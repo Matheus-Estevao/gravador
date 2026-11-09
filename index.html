@@ -41,6 +41,7 @@
   .nota { font-size:13px; color:var(--apagado); margin-top:8px; }
   .ok { color:var(--verde); } .erro { color:var(--verm); }
   audio { width:100%; margin:6px 0 14px; }
+  .importar { font-size:14px; color:var(--apagado); padding:8px 14px; border:1px solid var(--linha); border-radius:99px; }
   .chip { font-size:12px; padding:1px 7px; border-radius:99px; background:var(--linha); color:var(--apagado); }
 </style>
 </head>
@@ -57,6 +58,8 @@
     <div class="tempo" id="tempo">00:00</div>
     <button class="gravar" id="btnGravar" aria-label="Gravar"><span></span></button>
     <div class="estado" id="estado">Toque para gravar</div>
+    <button class="importar" id="btnImportar">Converter um áudio do celular</button>
+    <input type="file" id="arqImportar" accept="audio/*,.m4a,.mp3,.wav,.ogg,.aac,.flac,.3gp" hidden>
   </div>
   <h2>Gravações</h2>
   <div id="lista"></div>
@@ -103,7 +106,7 @@
 
 <script>
 'use strict';
-const VERSAO = 1;
+const VERSAO = 2;
 const TAXA = 16000;                 // 16 kHz mono: o que a Mistral precisa, e arquivo leve
 const SEG_S = 60;                   // a cada 60 s de áudio, um trecho vai pra Mistral
 const MODELO = 'voxtral-mini-latest';
@@ -159,7 +162,9 @@ let pedacos = [], amostrasSeg = 0, totalAmostras = 0, nSeg = 0;
 async function comecar() {
   if (!cfg.chave) { abrirCfg('Cole a chave da Mistral antes de gravar.'); return false; }
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    // tudo desligado: com cancelamento de eco/ruído o Android usa o microfone "de ligação" (ruim, um só).
+    // Sem eles, usa o modo gravador, com os microfones de cima e de baixo, igual ao gravador da Samsung.
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
   } catch { estado('Sem acesso ao microfone. Permita nas configurações do navegador.', 'erro'); return false; }
   ctx = new AudioContext({ sampleRate: TAXA });
   await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([codigoWorklet], { type: 'text/javascript' })));
@@ -223,7 +228,7 @@ function trechosDeVoz(pcm) {
   const q = TAXA / 50; let n = 0;
   for (let i = 0; i + q <= pcm.length; i += q) {
     let s = 0; for (let j = i; j < i + q; j += 2) s += pcm[j] * pcm[j];
-    if (Math.sqrt(s / (q / 2)) > 0.021) n++;
+    if (Math.sqrt(s / (q / 2)) > 0.012) n++;   // sem ganho automático o volume vem mais baixo
   }
   return n;
 }
@@ -260,8 +265,56 @@ function desenhar() {
   })();
 }
 
+// ---------- áudio vindo de outro app (compartilhado) ou escolhido no celular ----------
+// decodifica (m4a, mp3...), converte pra 16 kHz mono e corta em trechos de 60 s, igual à gravação
+async function importar(blob, nome) {
+  if (!cfg.chave) { abrirCfg('Cole a chave da Mistral antes de converter.'); return; }
+  estado('Lendo o áudio...');
+  let pcm;
+  try {
+    const c = new AudioContext({ sampleRate: TAXA });
+    const buf = await c.decodeAudioData(await blob.arrayBuffer());
+    c.close();
+    pcm = new Float32Array(buf.length);
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+      const d = buf.getChannelData(ch);
+      for (let i = 0; i < d.length; i++) pcm[i] += d[i] / buf.numberOfChannels;
+    }
+  } catch { estado('Não consegui ler esse formato de áudio.', 'erro'); return; }
+  const id = Date.now(), segs = [];
+  for (let o = 0, i = 0; o < pcm.length; o += SEG_S * TAXA, i++) {
+    const t = pcm.subarray(o, Math.min(pcm.length, o + SEG_S * TAXA));
+    segs.push({ wav: paraWav(t), estado: trechosDeVoz(t) >= 10 ? 'pendente' : 'feito', texto: '', s: t.length / TAXA });
+  }
+  await salvar({ id, inicio: new Date().toISOString(), dur: pcm.length / TAXA * 1000, segs, texto: '', nome: nome || '' });
+  atualId = id;
+  estado('Convertendo ' + segs.length + (segs.length > 1 ? ' trechos...' : ' trecho...'));
+  render();
+  if (!segs.some(s => s.estado === 'pendente')) finalizar(id);
+  segs.forEach((s, i) => s.estado === 'pendente' && transcrever(id, i));
+}
+
+async function verCompartilhado() {
+  if (!new URLSearchParams(location.search).has('compartilhado')) return;
+  history.replaceState(null, '', location.pathname);
+  const c = await caches.open('gravador-compartilhado');
+  const r = await c.match('./compartilhado');
+  if (!r) return;
+  await c.delete('./compartilhado');
+  importar(await r.blob(), decodeURIComponent(r.headers.get('X-Nome') || ''));
+}
+
+// no máximo 3 trechos indo pra Mistral ao mesmo tempo (áudio longo não estoura o limite)
+let ativos = 0; const espera = [];
+const vaga = () => new Promise(ok => { if (ativos < 3) { ativos++; ok(); } else espera.push(ok); });
+const liberar = () => { const p = espera.shift(); if (p) p(); else ativos--; };
+
 // ---------- Mistral ----------
 async function transcrever(id, i, tentativa = 1) {
+  await vaga();
+  try { await transcreverAgora(id, i, tentativa); } finally { liberar(); }
+}
+async function transcreverAgora(id, i, tentativa) {
   const g = await ler(id); if (!g) return;
   const seg = g.segs[i];
   if (!seg || seg.estado === 'feito' || !seg.wav) return;
@@ -355,7 +408,9 @@ $('btnGravar').onclick = async () => {
   $('btnGravar').disabled = true;
   try { await comecar(); } finally { $('btnGravar').disabled = false; }
 };
-$('btnVoltar').onclick = () => { $('folhaDet').classList.remove('aberta'); abertaId = null; };
+$('btnImportar').onclick = () => $('arqImportar').click();
+$('arqImportar').onchange = e => { const f = e.target.files[0]; if (f) importar(f, f.name); e.target.value = ''; };
+$('btnVoltar').onclick =() => { $('folhaDet').classList.remove('aberta'); abertaId = null; };
 $('btnCopiar').onclick = async () => { try { await navigator.clipboard.writeText($('detTexto').textContent); $('btnCopiar').textContent = 'Copiado'; setTimeout(() => $('btnCopiar').textContent = 'Copiar', 1500); } catch {} };
 $('btnCompartilhar').onclick = () => { const t = $('detTexto').textContent; if (navigator.share) navigator.share({ text: t }).catch(() => {}); };
 $('btnRefazer').onclick = async () => {
@@ -392,6 +447,7 @@ document.addEventListener('visibilitychange', async () => {
 abrirBanco().then(async () => {
   render();
   for (const g of await todas()) g.segs.forEach((s, i) => { if (s && s.wav && s.estado !== 'feito') transcrever(g.id, i); });
+  verCompartilhado();
 });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 </script>
