@@ -33,6 +33,10 @@
   .folha { position:fixed; inset:0; background:var(--fundo); display:none; flex-direction:column; z-index:5; padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
   .folha.aberta { display:flex; }
   .texto { white-space:pre-wrap; user-select:text; font-size:17px; line-height:1.6; }
+  .texto p { margin:0 0 16px; white-space:normal; }
+  .texto p b { font-weight:600; }
+  .texto span.p { border-radius:4px; cursor:pointer; }
+  .texto span.p.toca { background:rgba(229,72,77,.25); }
   .acoes { display:flex; gap:8px; padding:10px 16px 14px; border-top:1px solid var(--linha); }
   .acoes button { flex:1; padding:12px 0; border-radius:10px; background:var(--painel); font-size:14px; }
   .acoes button.perigo { color:var(--verm); flex:.7; }
@@ -111,7 +115,7 @@
 
 <script>
 'use strict';
-const VERSAO = 5;
+const VERSAO = 7;
 const TAXA = 16000;                 // 16 kHz mono: o que a Mistral precisa, e arquivo leve
 const SEG_S = 60;                   // a cada 60 s de áudio, um trecho vai pra Mistral
 const MODELO = 'voxtral-mini-latest';
@@ -326,7 +330,9 @@ async function transcreverInteiro(id, tentativa = 1) {
       const t = limpar(s.text || ''); if (!t) continue;
       const quem = s.speaker_id || 'speaker_1';
       const ult = falas[falas.length - 1];
-      if (ult && ult.quem === quem) ult.texto += ' ' + t; else falas.push({ quem, texto: t, inicio: s.start || 0 });
+      const parte = { texto: t, ini: +s.start || 0, fim: +s.end || +s.start || 0 };   // segundos no áudio
+      if (ult && ult.quem === quem) { ult.texto += ' ' + t; ult.partes.push(parte); }
+      else falas.push({ quem, texto: t, inicio: parte.ini, partes: [parte] });
     }
     await mudar(id, x => { x.vozes = 'feito'; x.falas = falas; delete x.vozesErro; });
   } catch (e) {
@@ -401,9 +407,15 @@ function traduzir(m) {
 
 async function finalizar(id) {
   const g = await mudar(id, x => {
-    x.texto = x.vozes === 'feito' && x.falas && x.falas.length
-      ? x.falas.map(f => nomePessoa(f.quem, x.nomes) + ': ' + f.texto).join('\n\n')
-      : x.segs.map(s => s && s.texto).filter(Boolean).join(' ');
+    if (x.vozes === 'feito' && x.falas && x.falas.length) {
+      // vozes com o mesmo nome viram uma pessoa só: falas seguidas dela se juntam num bloco
+      const blocos = [];
+      for (const f of x.falas) {
+        const nome = nomePessoa(f.quem, x.nomes), ult = blocos[blocos.length - 1];
+        if (ult && ult.nome === nome) ult.texto += ' ' + f.texto; else blocos.push({ nome, texto: f.texto });
+      }
+      x.texto = blocos.map(b => b.nome + ': ' + b.texto).join('\n\n');
+    } else x.texto = x.segs.map(s => s && s.texto).filter(Boolean).join(' ');
   });
   if (!g) return;
   const pend = g.vozes === 'pendente' || g.segs.some(s => !s || (s.estado !== 'feito' && s.estado !== 'reserva'));
@@ -434,13 +446,60 @@ async function render() {
   }
 }
 
-let abertaId = null, urlAudio = null;
+let abertaId = null, urlAudio = null, textoAberto = '';
+
+// texto tocável: cada palavra sabe o segundo em que foi dita (estimado dentro da frase pela posição)
+function desenharFalas(g) {
+  if (g.vozes !== 'feito' || !g.falas || !g.falas.length || !g.falas[0].partes) return false;
+  const caixa = $('detTexto'); caixa.innerHTML = '';
+  // junta falas seguidas com o mesmo nome (igual ao texto copiado)
+  const blocos = [];
+  for (const f of g.falas) {
+    const nome = nomePessoa(f.quem, g.nomes), ult = blocos[blocos.length - 1];
+    if (ult && ult.nome === nome) ult.partes.push(...f.partes); else blocos.push({ nome, partes: [...f.partes] });
+  }
+  for (const b of blocos) {
+    const p = document.createElement('p');
+    const n = document.createElement('b'); n.textContent = b.nome + ': '; p.appendChild(n);
+    for (const parte of b.partes) {
+      const palavras = parte.texto.split(/(\s+)/), total = parte.texto.length || 1, dur = Math.max(0, parte.fim - parte.ini);
+      let pos = 0;
+      for (const w of palavras) {
+        if (/^\s+$/.test(w) || !w) { p.appendChild(document.createTextNode(w)); pos += w.length; continue; }
+        const s = document.createElement('span'); s.className = 'p'; s.textContent = w;
+        s.dataset.t = (parte.ini + dur * pos / total).toFixed(2);
+        s.dataset.fim = (parte.ini + dur * (pos + w.length) / total).toFixed(2);
+        p.appendChild(s); pos += w.length;
+      }
+      p.appendChild(document.createTextNode(' '));
+    }
+    caixa.appendChild(p);
+  }
+  return true;
+}
+
+// tocar numa palavra: o áudio pula pra ela e toca
+$('detTexto').addEventListener('click', e => {
+  const s = e.target.closest('span.p'); if (!s) return;
+  if (window.getSelection && String(window.getSelection())) return;   // estava selecionando texto
+  const a = $('detAudio'); if (!a.src) return;
+  a.currentTime = Math.max(0, parseFloat(s.dataset.t) - 0.3);
+  a.play().catch(() => {});
+});
+// enquanto toca, a palavra do momento fica marcada
+$('detAudio').addEventListener('timeupdate', () => {
+  const t = $('detAudio').currentTime;
+  const ant = document.querySelector('#detTexto span.p.toca'); if (ant) ant.classList.remove('toca');
+  for (const s of document.querySelectorAll('#detTexto span.p'))
+    if (t >= +s.dataset.t && t < +s.dataset.fim) { s.classList.add('toca'); break; }
+});
 async function abrirDet(id) {
   const g = await ler(id); if (!g) return;
   abertaId = id;
   $('detTitulo').textContent = fmtData(g.inicio);
   const erro = g.segs.find(s => s && s.estado === 'erro');
-  $('detTexto').textContent = g.texto || (erro ? 'Falhou: ' + traduzir(erro.erro || '') : 'Convertendo...');
+  textoAberto = g.texto || '';
+  if (!desenharFalas(g)) $('detTexto').textContent = g.texto || (erro ? 'Falhou: ' + traduzir(erro.erro || '') : 'Convertendo...');
   // um botão por voz: toca e digita o nome da pessoa
   const pe = $('detPessoas'); pe.innerHTML = '';
   const vozes = g.vozes === 'feito' && g.falas ? [...new Set(g.falas.map(f => f.quem))] : [];
@@ -486,8 +545,8 @@ $('btnGravar').onclick = async () => {
 $('btnImportar').onclick = () => $('arqImportar').click();
 $('arqImportar').onchange = e => { const f = e.target.files[0]; if (f) importar(f, f.name); e.target.value = ''; };
 $('btnVoltar').onclick =() => { $('folhaDet').classList.remove('aberta'); abertaId = null; };
-$('btnCopiar').onclick = async () => { try { await navigator.clipboard.writeText($('detTexto').textContent); $('btnCopiar').textContent = 'Copiado'; setTimeout(() => $('btnCopiar').textContent = 'Copiar', 1500); } catch {} };
-$('btnCompartilhar').onclick = () => { const t = $('detTexto').textContent; if (navigator.share) navigator.share({ text: t }).catch(() => {}); };
+$('btnCopiar').onclick = async () => { try { await navigator.clipboard.writeText(textoAberto || $('detTexto').textContent); $('btnCopiar').textContent = 'Copiado'; setTimeout(() => $('btnCopiar').textContent = 'Copiar', 1500); } catch {} };
+$('btnCompartilhar').onclick = () => { const t = textoAberto || $('detTexto').textContent; if (navigator.share) navigator.share({ text: t }).catch(() => {}); };
 $('btnRefazer').onclick = async () => {
   // refaz pelo caminho completo: arquivo inteiro com separação de vozes (se falhar, cai nos trechos)
   const g = await mudar(abertaId, x => { x.vozes = 'pendente'; x.falas = []; x.segs.forEach(s => { if (s && s.wav && s.estado !== 'feito') s.estado = 'reserva'; }); });
