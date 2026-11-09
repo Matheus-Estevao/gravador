@@ -106,7 +106,7 @@
 
 <script>
 'use strict';
-const VERSAO = 2;
+const VERSAO = 4;
 const TAXA = 16000;                 // 16 kHz mono: o que a Mistral precisa, e arquivo leve
 const SEG_S = 60;                   // a cada 60 s de áudio, um trecho vai pra Mistral
 const MODELO = 'voxtral-mini-latest';
@@ -209,6 +209,9 @@ async function parar() {
   gravando = false;
   clearInterval(relogio);
   fecharTrecho();
+  // o texto dos trechos aparece primeiro; depois o áudio inteiro volta separado por pessoa
+  const idParado = atualId;
+  mudar(idParado, x => { x.vozes = 'pendente'; }).then(() => transcreverInteiro(idParado));
   try { no && no.disconnect(); } catch {}
   stream && stream.getTracks().forEach(t => t.stop());
   ctx && ctx.close();
@@ -284,15 +287,54 @@ async function importar(blob, nome) {
   const id = Date.now(), segs = [];
   for (let o = 0, i = 0; o < pcm.length; o += SEG_S * TAXA, i++) {
     const t = pcm.subarray(o, Math.min(pcm.length, o + SEG_S * TAXA));
-    segs.push({ wav: paraWav(t), estado: trechosDeVoz(t) >= 10 ? 'pendente' : 'feito', texto: '', s: t.length / TAXA });
+    // trechos ficam de reserva: só vão pra Mistral se a separação de vozes do arquivo inteiro falhar
+    segs.push({ wav: paraWav(t), estado: trechosDeVoz(t) >= 10 ? 'reserva' : 'feito', texto: '', s: t.length / TAXA });
   }
-  await salvar({ id, inicio: new Date().toISOString(), dur: pcm.length / TAXA * 1000, segs, texto: '', nome: nome || '' });
+  // guarda o arquivo ORIGINAL pra ouvir com a qualidade da Samsung e pra mandar inteiro pra Mistral
+  await salvar({ id, inicio: new Date().toISOString(), dur: pcm.length / TAXA * 1000, segs, texto: '', nome: nome || '', original: blob, vozes: 'pendente' });
   atualId = id;
-  estado('Convertendo ' + segs.length + (segs.length > 1 ? ' trechos...' : ' trecho...'));
+  estado('Transcrevendo e separando as vozes...');
   render();
-  if (!segs.some(s => s.estado === 'pendente')) finalizar(id);
-  segs.forEach((s, i) => s.estado === 'pendente' && transcrever(id, i));
+  transcreverInteiro(id);
 }
+
+// ---------- arquivo inteiro com separação de vozes (diarize) ----------
+async function transcreverInteiro(id, tentativa = 1) {
+  const g = await ler(id); if (!g) return;
+  if (!g.segs.some(s => s && s.wav && (s.estado !== 'feito' || s.texto))) {   // só silêncio
+    await mudar(id, x => { x.vozes = 'feito'; x.falas = []; }); finalizar(id); return;
+  }
+  const blob = g.original || await juntarWavBlob(g);
+  const ext = /mp4|m4a|aac/.test(blob.type) ? 'm4a' : /mpeg|mp3/.test(blob.type) ? 'mp3' : /ogg|opus/.test(blob.type) ? 'ogg' : /flac/.test(blob.type) ? 'flac' : 'wav';
+  const fd = new FormData();
+  fd.append('model', MODELO);
+  fd.append('diarize', 'true');
+  fd.append('timestamp_granularities', 'segment');
+  fd.append('file', blob, 'conversa.' + ext);
+  try {
+    const r = await fetch('https://api.mistral.ai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + cfg.chave }, body: fd });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status + ' ' + (j.message || (j.detail && JSON.stringify(j.detail)) || ''));
+    // junta frases seguidas da mesma pessoa num bloco só
+    const falas = [];
+    for (const s of (j.segments || [])) {
+      const t = limpar(s.text || ''); if (!t) continue;
+      const quem = s.speaker_id || 'speaker_1';
+      const ult = falas[falas.length - 1];
+      if (ult && ult.quem === quem) ult.texto += ' ' + t; else falas.push({ quem, texto: t, inicio: s.start || 0 });
+    }
+    await mudar(id, x => { x.vozes = 'feito'; x.falas = falas; delete x.vozesErro; });
+  } catch (e) {
+    const erro = String(e.message || e);
+    if (tentativa < 3 && !/^(400|401|403|413|422) /.test(erro)) { setTimeout(() => transcreverInteiro(id, tentativa + 1), 4000 * tentativa); return; }
+    // não deu: fica com o texto sem separação (trechos de 1 min)
+    const x = await mudar(id, x => { x.vozes = 'erro'; x.vozesErro = erro; x.segs.forEach(s => { if (s && s.estado === 'reserva') s.estado = 'pendente'; }); });
+    if (x && x.segs.some(s => s && s.estado === 'pendente')) { x.segs.forEach((s, i) => s && s.estado === 'pendente' && transcrever(id, i)); return; }
+  }
+  finalizar(id);
+}
+
+function nomePessoa(quem) { const n = String(quem).match(/\d+/); return 'Pessoa ' + (n ? n[0] : '?'); }
 
 async function verCompartilhado() {
   if (!new URLSearchParams(location.search).has('compartilhado')) return;
@@ -349,9 +391,13 @@ function traduzir(m) {
 }
 
 async function finalizar(id) {
-  const g = await mudar(id, x => { x.texto = x.segs.map(s => s && s.texto).filter(Boolean).join(' '); });
+  const g = await mudar(id, x => {
+    x.texto = x.vozes === 'feito' && x.falas && x.falas.length
+      ? x.falas.map(f => nomePessoa(f.quem) + ': ' + f.texto).join('\n\n')
+      : x.segs.map(s => s && s.texto).filter(Boolean).join(' ');
+  });
   if (!g) return;
-  const pend = g.segs.some(s => !s || s.estado !== 'feito');
+  const pend = g.vozes === 'pendente' || g.segs.some(s => !s || (s.estado !== 'feito' && s.estado !== 'reserva'));
   if (!gravando && !pend && id === atualId) estado(g.texto ? 'Pronto' : 'Não ouvi fala', g.texto ? 'ok' : '');
   render();
   if (abertaId === id) abrirDet(id);
@@ -370,7 +416,8 @@ async function render() {
     const ativa = gravando && g.id === atualId;
     const pend = g.segs.some(s => !s || s.estado === 'pendente'), erro = g.segs.some(s => s && s.estado === 'erro');
     const b = document.createElement('button'); b.className = 'item';
-    const chip = ativa ? '<span class="chip">gravando</span>' : erro ? '<span class="chip erro">erro</span>' : pend ? '<span class="chip">convertendo</span>' : '';
+    const chip = ativa ? '<span class="chip">gravando</span>' : erro ? '<span class="chip erro">erro</span>' : pend ? '<span class="chip">convertendo</span>'
+      : g.vozes === 'pendente' ? '<span class="chip">separando vozes</span>' : '';
     b.innerHTML = `<div class="topo"><span>${fmtData(g.inicio)} · ${fmtDur(g.dur || 0)}</span>${chip}</div><div class="previa"></div>`;
     b.querySelector('.previa').textContent = g.texto || (ativa || pend ? '...' : '(sem fala)');
     b.onclick = () => abrirDet(g.id);
@@ -394,13 +441,18 @@ async function abrirDet(id) {
 
 // junta os trechos num WAV só, pra ouvir a gravação inteira
 async function juntarAudio(g) {
+  if (g.original) return URL.createObjectURL(g.original);
+  const b = await juntarWavBlob(g);
+  return b ? URL.createObjectURL(b) : null;
+}
+async function juntarWavBlob(g) {
   const ws = g.segs.filter(s => s && s.wav).map(s => s.wav);
   if (!ws.length) return null;
   const dados = await Promise.all(ws.map(w => w.slice(44).arrayBuffer()));
   const total = dados.reduce((a, d) => a + d.byteLength, 0);
   const cab = new Uint8Array(await ws[0].slice(0, 44).arrayBuffer());
   const v = new DataView(cab.buffer); v.setUint32(4, 36 + total, true); v.setUint32(40, total, true);
-  return URL.createObjectURL(new Blob([cab, ...dados], { type: 'audio/wav' }));
+  return new Blob([cab, ...dados], { type: 'audio/wav' });
 }
 
 $('btnGravar').onclick = async () => {
@@ -414,10 +466,11 @@ $('btnVoltar').onclick =() => { $('folhaDet').classList.remove('aberta'); aberta
 $('btnCopiar').onclick = async () => { try { await navigator.clipboard.writeText($('detTexto').textContent); $('btnCopiar').textContent = 'Copiado'; setTimeout(() => $('btnCopiar').textContent = 'Copiar', 1500); } catch {} };
 $('btnCompartilhar').onclick = () => { const t = $('detTexto').textContent; if (navigator.share) navigator.share({ text: t }).catch(() => {}); };
 $('btnRefazer').onclick = async () => {
-  const g = await mudar(abertaId, x => x.segs.forEach(s => { if (s && s.wav) { s.estado = 'pendente'; s.texto = ''; } }));
+  // refaz pelo caminho completo: arquivo inteiro com separação de vozes (se falhar, cai nos trechos)
+  const g = await mudar(abertaId, x => { x.vozes = 'pendente'; x.falas = []; x.segs.forEach(s => { if (s && s.wav && s.estado !== 'feito') s.estado = 'reserva'; }); });
   if (!g) return;
-  $('detTexto').textContent = 'Convertendo...';
-  g.segs.forEach((s, i) => s && s.estado === 'pendente' && transcrever(g.id, i));
+  $('detTexto').textContent = 'Transcrevendo e separando as vozes...';
+  transcreverInteiro(g.id);
 };
 $('btnApagar').onclick = async () => { if (confirm('Apagar esta gravação e o áudio?')) { await apagar(abertaId); $('folhaDet').classList.remove('aberta'); abertaId = null; render(); } };
 
@@ -446,7 +499,10 @@ document.addEventListener('visibilitychange', async () => {
 // ao abrir, termina o que ficou pendente (ex.: estava sem internet)
 abrirBanco().then(async () => {
   render();
-  for (const g of await todas()) g.segs.forEach((s, i) => { if (s && s.wav && s.estado !== 'feito') transcrever(g.id, i); });
+  for (const g of await todas()) {
+    g.segs.forEach((s, i) => { if (s && s.wav && s.estado !== 'feito' && s.estado !== 'reserva') transcrever(g.id, i); });
+    if (g.vozes === 'pendente') transcreverInteiro(g.id);
+  }
   verCompartilhado();
 });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

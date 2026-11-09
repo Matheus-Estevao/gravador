@@ -1,5 +1,5 @@
 // Guarda a casca do app pra abrir mesmo sem internet; a Mistral sempre vai direto pela rede.
-const CACHE = 'gravador-v2';
+const CACHE = 'gravador-v4';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
