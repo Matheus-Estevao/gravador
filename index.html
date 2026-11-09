@@ -36,7 +36,7 @@
   .texto p { margin:0 0 16px; white-space:normal; }
   .texto p b { font-weight:600; }
   .texto span.p { border-radius:4px; cursor:pointer; }
-  .texto span.p.toca { background:rgba(229,72,77,.25); }
+  .texto span.p.toca { color:#d97757; }
   .acoes { display:flex; gap:8px; padding:10px 16px 14px; border-top:1px solid var(--linha); }
   .acoes button { flex:1; padding:12px 0; border-radius:10px; background:var(--painel); font-size:14px; }
   .acoes button.perigo { color:var(--verm); flex:.7; }
@@ -115,7 +115,7 @@
 
 <script>
 'use strict';
-const VERSAO = 7;
+const VERSAO = 8;
 const TAXA = 16000;                 // 16 kHz mono: o que a Mistral precisa, e arquivo leve
 const SEG_S = 60;                   // a cada 60 s de áudio, um trecho vai pra Mistral
 const MODELO = 'voxtral-mini-latest';
@@ -334,7 +334,15 @@ async function transcreverInteiro(id, tentativa = 1) {
       if (ult && ult.quem === quem) { ult.texto += ' ' + t; ult.partes.push(parte); }
       else falas.push({ quem, texto: t, inicio: parte.ini, partes: [parte] });
     }
-    await mudar(id, x => { x.vozes = 'feito'; x.falas = falas; delete x.vozesErro; });
+    // 2º pedido: o segundo exato de cada palavra (com diarize a API só dá o tempo da frase)
+    let palavras = null;
+    try {
+      const fw = new FormData();
+      fw.append('model', MODELO); fw.append('timestamp_granularities', 'word'); fw.append('file', blob, 'conversa.' + ext);
+      const rw = await fetch('https://api.mistral.ai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + cfg.chave }, body: fw });
+      if (rw.ok) palavras = ((await rw.json()).segments || []).map(w => ({ t: (w.text || '').trim(), ini: +w.start || 0, fim: +w.end || +w.start || 0 })).filter(w => w.t);
+    } catch {}
+    await mudar(id, x => { x.vozes = 'feito'; x.falas = falas; x.palavras = palavras; delete x.vozesErro; });
   } catch (e) {
     const erro = String(e.message || e);
     if (tentativa < 3 && !/^(400|401|403|413|422) /.test(erro)) { setTimeout(() => transcreverInteiro(id, tentativa + 1), 4000 * tentativa); return; }
@@ -446,7 +454,7 @@ async function render() {
   }
 }
 
-let abertaId = null, urlAudio = null, textoAberto = '';
+let abertaId = null, urlAudio = null, textoAberto = '', ultimoToque = 0;
 
 // texto tocável: cada palavra sabe o segundo em que foi dita (estimado dentro da frase pela posição)
 function desenharFalas(g) {
@@ -458,10 +466,24 @@ function desenharFalas(g) {
     const nome = nomePessoa(f.quem, g.nomes), ult = blocos[blocos.length - 1];
     if (ult && ult.nome === nome) ult.partes.push(...f.partes); else blocos.push({ nome, partes: [...f.partes] });
   }
+  const pals = g.palavras || []; let k = 0;
   for (const b of blocos) {
     const p = document.createElement('p');
     const n = document.createElement('b'); n.textContent = b.nome + ': '; p.appendChild(n);
     for (const parte of b.partes) {
+      // com tempo exato por palavra: usa as palavras que caem dentro desta frase
+      const daqui = [];
+      // (palavras que ficaram entre duas frases entram na seguinte, nenhuma some)
+      while (k < pals.length && pals[k].ini < parte.fim + 0.3) daqui.push(pals[k++]);
+      if (daqui.length) {
+        for (const w of daqui) {
+          const s = document.createElement('span'); s.className = 'p'; s.textContent = w.t;
+          s.dataset.t = w.ini.toFixed(2); s.dataset.fim = Math.max(w.fim, w.ini + 0.15).toFixed(2);
+          p.appendChild(s); p.appendChild(document.createTextNode(' '));
+        }
+        continue;
+      }
+      // sem tempo por palavra: estima pela posição dentro da frase
       const palavras = parte.texto.split(/(\s+)/), total = parte.texto.length || 1, dur = Math.max(0, parte.fim - parte.ini);
       let pos = 0;
       for (const w of palavras) {
@@ -475,6 +497,13 @@ function desenharFalas(g) {
     }
     caixa.appendChild(p);
   }
+  // palavras depois da última frase vão pro último parágrafo
+  const ultP = caixa.lastElementChild;
+  for (; k < pals.length && ultP; k++) {
+    const s = document.createElement('span'); s.className = 'p'; s.textContent = pals[k].t;
+    s.dataset.t = pals[k].ini.toFixed(2); s.dataset.fim = Math.max(pals[k].fim, pals[k].ini + 0.15).toFixed(2);
+    ultP.appendChild(s); ultP.appendChild(document.createTextNode(' '));
+  }
   return true;
 }
 
@@ -483,15 +512,21 @@ $('detTexto').addEventListener('click', e => {
   const s = e.target.closest('span.p'); if (!s) return;
   if (window.getSelection && String(window.getSelection())) return;   // estava selecionando texto
   const a = $('detAudio'); if (!a.src) return;
-  a.currentTime = Math.max(0, parseFloat(s.dataset.t) - 0.3);
+  const ant = document.querySelector('#detTexto span.p.toca'); if (ant) ant.classList.remove('toca');
+  s.classList.add('toca'); ultimoToque = Date.now();
+  a.currentTime = Math.max(0, parseFloat(s.dataset.t));
   a.play().catch(() => {});
 });
 // enquanto toca, a palavra do momento fica marcada
 $('detAudio').addEventListener('timeupdate', () => {
+  if (Date.now() - ultimoToque < 500) return;   // logo após o toque o áudio ainda está pulando: mantém a palavra tocada
   const t = $('detAudio').currentTime;
-  const ant = document.querySelector('#detTexto span.p.toca'); if (ant) ant.classList.remove('toca');
+  let atual = null;
   for (const s of document.querySelectorAll('#detTexto span.p'))
-    if (t >= +s.dataset.t && t < +s.dataset.fim) { s.classList.add('toca'); break; }
+    if (t >= +s.dataset.t && t < +s.dataset.fim) { atual = s; break; }
+  if (!atual) return;   // entre palavras (ou ainda pulando): mantém a marcada
+  const ant = document.querySelector('#detTexto span.p.toca');
+  if (ant !== atual) { if (ant) ant.classList.remove('toca'); atual.classList.add('toca'); }
 });
 async function abrirDet(id) {
   const g = await ler(id); if (!g) return;
