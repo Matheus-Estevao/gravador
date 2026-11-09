@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f1e1d">
+<title>Gravador</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>
+  :root { --fundo:#262624; --painel:#1f1e1d; --linha:#3a3936; --texto:#ece9e2; --apagado:#9b978e; --verm:#e5484d; --verde:#3fb950; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; background:var(--fundo); color:var(--texto); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  body { display:flex; flex-direction:column; padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  header { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; }
+  header h1 { font-size:18px; font-weight:600; margin:0; }
+  button { font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
+  .icone { width:42px; height:42px; border-radius:10px; display:grid; place-items:center; color:var(--apagado); }
+  .icone:active { background:var(--linha); }
+  main { flex:1; overflow-y:auto; padding:0 16px 24px; }
+  .palco { display:flex; flex-direction:column; align-items:center; gap:14px; padding:10px 0 26px; }
+  canvas { width:100%; max-width:440px; height:70px; }
+  .tempo { font-variant-numeric:tabular-nums; font-size:40px; font-weight:300; letter-spacing:1px; }
+  .estado { color:var(--apagado); font-size:14px; min-height:21px; text-align:center; }
+  .gravar { width:150px; height:150px; border-radius:50%; border:4px solid var(--linha); display:grid; place-items:center; touch-action:manipulation; }
+  .gravar span { width:112px; height:112px; border-radius:50%; background:var(--verm); transition:all .2s; }
+  .gravar.ativo span { width:54px; height:54px; border-radius:12px; }
+  h2 { font-size:13px; font-weight:600; color:var(--apagado); text-transform:uppercase; letter-spacing:.6px; margin:8px 0; }
+  .item { display:block; width:100%; text-align:left; padding:12px 14px; border-radius:12px; background:var(--painel); margin-bottom:8px; }
+  .item .topo { display:flex; justify-content:space-between; font-size:13px; color:var(--apagado); }
+  .item .previa { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin-top:2px; }
+  .vazio { color:var(--apagado); text-align:center; padding:30px 0; font-size:14px; }
+  .folha { position:fixed; inset:0; background:var(--fundo); display:none; flex-direction:column; z-index:5; padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+  .folha.aberta { display:flex; }
+  .texto { white-space:pre-wrap; user-select:text; font-size:17px; line-height:1.6; }
+  .acoes { display:flex; gap:8px; padding:10px 16px 14px; border-top:1px solid var(--linha); }
+  .acoes button { flex:1; padding:12px 0; border-radius:10px; background:var(--painel); font-size:14px; }
+  .acoes button.perigo { color:var(--verm); flex:.7; }
+  label { display:block; font-size:14px; color:var(--apagado); margin:16px 0 6px; }
+  input, select { width:100%; padding:12px; border-radius:10px; border:1px solid var(--linha); background:var(--painel); color:var(--texto); font:inherit; }
+  .nota { font-size:13px; color:var(--apagado); margin-top:8px; }
+  .ok { color:var(--verde); } .erro { color:var(--verm); }
+  audio { width:100%; margin:6px 0 14px; }
+  .chip { font-size:12px; padding:1px 7px; border-radius:99px; background:var(--linha); color:var(--apagado); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gravador</h1>
+  <button class="icone" id="btnConfig" aria-label="Configurações">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+  </button>
+</header>
+<main>
+  <div class="palco">
+    <canvas id="ondas" width="880" height="140"></canvas>
+    <div class="tempo" id="tempo">00:00</div>
+    <button class="gravar" id="btnGravar" aria-label="Gravar"><span></span></button>
+    <div class="estado" id="estado">Toque para gravar</div>
+  </div>
+  <h2>Gravações</h2>
+  <div id="lista"></div>
+</main>
+
+<section class="folha" id="folhaDet">
+  <header>
+    <button class="icone" id="btnVoltar" aria-label="Voltar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <h1 id="detTitulo">Gravação</h1>
+    <span style="width:42px"></span>
+  </header>
+  <main>
+    <audio id="detAudio" controls preload="none"></audio>
+    <div class="texto" id="detTexto"></div>
+  </main>
+  <div class="acoes">
+    <button id="btnCopiar">Copiar</button>
+    <button id="btnCompartilhar">Compartilhar</button>
+    <button id="btnRefazer">Refazer</button>
+    <button class="perigo" id="btnApagar">Apagar</button>
+  </div>
+</section>
+
+<section class="folha" id="folhaCfg">
+  <header>
+    <button class="icone" id="btnFecharCfg" aria-label="Voltar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></button>
+    <h1>Configurações</h1>
+    <span style="width:42px"></span>
+  </header>
+  <main>
+    <label for="cfgChave">Chave da API da Mistral</label>
+    <input id="cfgChave" type="password" autocomplete="off" placeholder="cole aqui">
+    <div class="nota">Fica guardada só neste celular. Crie uma chave própria pro celular em console.mistral.ai.</div>
+    <label for="cfgTela">Tela durante a gravação</label>
+    <select id="cfgTela">
+      <option value="off">Pode apagar (grava em segundo plano)</option>
+      <option value="on">Manter acesa</option>
+    </select>
+    <div class="nota" id="cfgStatus"></div>
+    <div class="acoes" style="border:0;padding:16px 0 0"><button id="btnSalvarCfg">Salvar e testar</button></div>
+    <div class="nota" style="margin-top:24px">Versão <span id="versao"></span></div>
+  </main>
+</section>
+
+<script>
+'use strict';
+const VERSAO = 1;
+const TAXA = 16000;                 // 16 kHz mono: o que a Mistral precisa, e arquivo leve
+const SEG_S = 60;                   // a cada 60 s de áudio, um trecho vai pra Mistral
+const MODELO = 'voxtral-mini-latest';
+const $ = id => document.getElementById(id);
+$('versao').textContent = VERSAO;
+const cfg = {
+  get chave() { try { return localStorage.getItem('grav_chave_mistral') || ''; } catch { return ''; } },
+  get tela() { try { return localStorage.getItem('grav_tela') || 'off'; } catch { return 'off'; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+};
+
+// ---------- banco local (IndexedDB) ----------
+let db;
+function abrirBanco() {
+  return new Promise((ok, falha) => {
+    const r = indexedDB.open('gravador-mistral', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('grav', { keyPath: 'id' });
+    r.onsuccess = () => { db = r.result; ok(); };
+    r.onerror = () => falha(r.error);
+  });
+}
+const salvar = g => new Promise(ok => { const t = db.transaction('grav', 'readwrite'); t.objectStore('grav').put(g); t.oncomplete = ok; });
+const ler = id => new Promise(ok => { const r = db.transaction('grav').objectStore('grav').get(id); r.onsuccess = () => ok(r.result); });
+const todas = () => new Promise(ok => { const r = db.transaction('grav').objectStore('grav').getAll(); r.onsuccess = () => ok(r.result.sort((a, b) => b.id - a.id)); });
+const apagar = id => new Promise(ok => { const t = db.transaction('grav', 'readwrite'); t.objectStore('grav').delete(id); t.oncomplete = ok; });
+// alterações em fila: um trecho nunca apaga o texto do outro
+let fila = Promise.resolve();
+function mudar(id, fn) {
+  const p = fila.then(async () => { const g = await ler(id); if (!g) return null; fn(g); await salvar(g); return g; });
+  fila = p.catch(() => {});
+  return p;
+}
+
+// ---------- captura: AudioWorklet entrega amostras; cortamos a cada 60 s pela CONTAGEM de amostras ----------
+// (contar amostras não depende de relógio, então funciona mesmo com o app em segundo plano)
+const codigoWorklet = `
+class Coletor extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(4000); this.n = 0; }
+  process(entradas) {
+    const c = entradas[0] && entradas[0][0];
+    if (c) for (let i = 0; i < c.length; i++) {
+      this.buf[this.n++] = c[i];
+      if (this.n === this.buf.length) { this.port.postMessage(this.buf); this.buf = new Float32Array(4000); this.n = 0; }
+    }
+    return true;
+  }
+  }
+registerProcessor('coletor', Coletor);`;
+
+let gravando = false, stream, ctx, no, analisador, atualId, inicio, relogio, travaTela;
+let pedacos = [], amostrasSeg = 0, totalAmostras = 0, nSeg = 0;
+
+async function comecar() {
+  if (!cfg.chave) { abrirCfg('Cole a chave da Mistral antes de gravar.'); return false; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch { estado('Sem acesso ao microfone. Permita nas configurações do navegador.', 'erro'); return false; }
+  ctx = new AudioContext({ sampleRate: TAXA });
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([codigoWorklet], { type: 'text/javascript' })));
+  const fonte = ctx.createMediaStreamSource(stream);
+  no = new AudioWorkletNode(ctx, 'coletor');
+  analisador = ctx.createAnalyser(); analisador.fftSize = 1024;
+  fonte.connect(no); fonte.connect(analisador);
+  no.port.onmessage = e => receber(e.data);
+  if (ctx.state === 'suspended') await ctx.resume();
+  atualId = Date.now();
+  await salvar({ id: atualId, inicio: new Date().toISOString(), dur: 0, segs: [], texto: '' });
+  pedacos = []; amostrasSeg = 0; totalAmostras = 0; nSeg = 0;
+  inicio = Date.now(); gravando = true;
+  relogio = setInterval(tique, 250);
+  await pedirTela();
+  $('btnGravar').classList.add('ativo');
+  estado('Gravando');
+  desenhar(); render();
+  return true;
+}
+
+function receber(f32) {
+  if (!gravando) return;
+  pedacos.push(f32); amostrasSeg += f32.length; totalAmostras += f32.length;
+  if (amostrasSeg >= SEG_S * TAXA) fecharTrecho();
+}
+
+function fecharTrecho() {
+  if (!amostrasSeg) return;
+  const pcm = new Float32Array(amostrasSeg);
+  let o = 0; for (const p of pedacos) { pcm.set(p, o); o += p.length; }
+  pedacos = []; amostrasSeg = 0;
+  const i = nSeg++, id = atualId;
+  const voz = trechosDeVoz(pcm);
+  const seg = { wav: paraWav(pcm), estado: voz >= 10 ? 'pendente' : 'feito', texto: '', s: pcm.length / TAXA };
+  mudar(id, g => { g.segs[i] = seg; g.dur = totalAmostras / TAXA * 1000; }).then(() => {
+    if (seg.estado === 'pendente') transcrever(id, i); else finalizar(id);
+  });
+}
+
+async function parar() {
+  gravando = false;
+  clearInterval(relogio);
+  fecharTrecho();
+  try { no && no.disconnect(); } catch {}
+  stream && stream.getTracks().forEach(t => t.stop());
+  ctx && ctx.close();
+  try { travaTela && travaTela.release(); } catch {}
+  travaTela = null;
+  $('btnGravar').classList.remove('ativo');
+  estado('Convertendo o último trecho...');
+}
+
+function tique() {
+  const s = Math.floor(totalAmostras / TAXA);
+  $('tempo').textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+// trechos de 20 ms com volume de voz (silêncio e batida no microfone não vão pra Mistral, que inventaria texto)
+function trechosDeVoz(pcm) {
+  const q = TAXA / 50; let n = 0;
+  for (let i = 0; i + q <= pcm.length; i += q) {
+    let s = 0; for (let j = i; j < i + q; j += 2) s += pcm[j] * pcm[j];
+    if (Math.sqrt(s / (q / 2)) > 0.021) n++;
+  }
+  return n;
+}
+
+function paraWav(pcm) {
+  const b = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(b);
+  const txt = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  txt(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); txt(8, 'WAVEfmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, TAXA, true); v.setUint32(28, TAXA * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  txt(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  return new Blob([b], { type: 'audio/wav' });
+}
+
+async function pedirTela() {
+  if (cfg.tela !== 'on' || !('wakeLock' in navigator)) return;
+  try { travaTela = await navigator.wakeLock.request('screen'); travaTela.addEventListener('release', () => { travaTela = null; }); } catch {}
+}
+
+// ondinhas finas
+const hist = new Array(70).fill(0), amostra = new Uint8Array(1024);
+function desenhar() {
+  const c = $('ondas'), g = c.getContext('2d');
+  (function quadro() {
+    let pico = 0;
+    if (gravando && analisador) { analisador.getByteTimeDomainData(amostra); for (const v of amostra) pico = Math.max(pico, Math.abs(v - 128) / 128); }
+    hist.shift(); hist.push(pico);
+    g.clearRect(0, 0, c.width, c.height);
+    const passo = c.width / hist.length;
+    g.fillStyle = gravando ? '#e5484d' : '#3a3936';
+    hist.forEach((p, i) => { const h = Math.max(4, Math.min(c.height, Math.pow(p, 0.6) * c.height * 1.3)); g.fillRect(i * passo + passo / 2 - 1.5, (c.height - h) / 2, 3, h); });
+    if (gravando) requestAnimationFrame(quadro);
+  })();
+}
+
+// ---------- Mistral ----------
+async function transcrever(id, i, tentativa = 1) {
+  const g = await ler(id); if (!g) return;
+  const seg = g.segs[i];
+  if (!seg || seg.estado === 'feito' || !seg.wav) return;
+  const fd = new FormData();
+  fd.append('model', MODELO);
+  fd.append('language', 'pt');
+  fd.append('file', seg.wav, 'trecho' + i + '.wav');
+  try {
+    const r = await fetch('https://api.mistral.ai/v1/audio/transcriptions', { method: 'POST', headers: { Authorization: 'Bearer ' + cfg.chave }, body: fd });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(r.status + ' ' + (j.message || (j.detail && JSON.stringify(j.detail)) || ''));
+    const texto = limpar(j.text || '');
+    await mudar(id, x => { x.segs[i].texto = texto; x.segs[i].estado = 'feito'; delete x.segs[i].erro; });
+  } catch (e) {
+    const erro = String(e.message || e);
+    await mudar(id, x => { x.segs[i].estado = 'erro'; x.segs[i].erro = erro; });
+    if (tentativa < 4 && !/^(400|401|403|422) /.test(erro)) { setTimeout(() => transcrever(id, i, tentativa + 1), 3000 * tentativa); return; }
+    if (!gravando) estado('Erro: ' + traduzir(erro), 'erro');
+    render(); return;
+  }
+  finalizar(id);
+}
+
+function limpar(t) {
+  return /[Ѐ-ӿ֐-ۿऀ-෿฀-๿ᄀ-ᇿ぀-ヿ㄰-㆏一-鿿가-힯]/.test(t) ? '' : t.trim();
+}
+function traduzir(m) {
+  if (m.startsWith('401')) return 'chave inválida';
+  if (m.startsWith('402') || m.startsWith('429')) return 'sem crédito ou limite atingido';
+  if (/fetch|network|Failed/i.test(m)) return 'sem internet; abra o app de novo depois que ele termina';
+  return m.slice(0, 90);
+}
+
+async function finalizar(id) {
+  const g = await mudar(id, x => { x.texto = x.segs.map(s => s && s.texto).filter(Boolean).join(' '); });
+  if (!g) return;
+  const pend = g.segs.some(s => !s || s.estado !== 'feito');
+  if (!gravando && !pend && id === atualId) estado(g.texto ? 'Pronto' : 'Não ouvi fala', g.texto ? 'ok' : '');
+  render();
+  if (abertaId === id) abrirDet(id);
+}
+
+// ---------- telas ----------
+function estado(t, cls = '') { const e = $('estado'); e.textContent = t; e.className = 'estado ' + cls; }
+const fmtDur = ms => { const s = Math.round(ms / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+const fmtData = iso => new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+async function render() {
+  const l = $('lista'), gs = await todas();
+  if (!gs.length) { l.innerHTML = '<div class="vazio">Nenhuma gravação ainda</div>'; return; }
+  l.innerHTML = '';
+  for (const g of gs) {
+    const ativa = gravando && g.id === atualId;
+    const pend = g.segs.some(s => !s || s.estado === 'pendente'), erro = g.segs.some(s => s && s.estado === 'erro');
+    const b = document.createElement('button'); b.className = 'item';
+    const chip = ativa ? '<span class="chip">gravando</span>' : erro ? '<span class="chip erro">erro</span>' : pend ? '<span class="chip">convertendo</span>' : '';
+    b.innerHTML = `<div class="topo"><span>${fmtData(g.inicio)} · ${fmtDur(g.dur || 0)}</span>${chip}</div><div class="previa"></div>`;
+    b.querySelector('.previa').textContent = g.texto || (ativa || pend ? '...' : '(sem fala)');
+    b.onclick = () => abrirDet(g.id);
+    l.appendChild(b);
+  }
+}
+
+let abertaId = null, urlAudio = null;
+async function abrirDet(id) {
+  const g = await ler(id); if (!g) return;
+  abertaId = id;
+  $('detTitulo').textContent = fmtData(g.inicio);
+  const erro = g.segs.find(s => s && s.estado === 'erro');
+  $('detTexto').textContent = g.texto || (erro ? 'Falhou: ' + traduzir(erro.erro || '') : 'Convertendo...');
+  if (urlAudio) URL.revokeObjectURL(urlAudio);
+  urlAudio = await juntarAudio(g);
+  $('detAudio').src = urlAudio || '';
+  $('detAudio').style.display = urlAudio ? '' : 'none';
+  $('folhaDet').classList.add('aberta');
+}
+
+// junta os trechos num WAV só, pra ouvir a gravação inteira
+async function juntarAudio(g) {
+  const ws = g.segs.filter(s => s && s.wav).map(s => s.wav);
+  if (!ws.length) return null;
+  const dados = await Promise.all(ws.map(w => w.slice(44).arrayBuffer()));
+  const total = dados.reduce((a, d) => a + d.byteLength, 0);
+  const cab = new Uint8Array(await ws[0].slice(0, 44).arrayBuffer());
+  const v = new DataView(cab.buffer); v.setUint32(4, 36 + total, true); v.setUint32(40, total, true);
+  return URL.createObjectURL(new Blob([cab, ...dados], { type: 'audio/wav' }));
+}
+
+$('btnGravar').onclick = async () => {
+  if (gravando) { parar(); return; }
+  $('btnGravar').disabled = true;
+  try { await comecar(); } finally { $('btnGravar').disabled = false; }
+};
+$('btnVoltar').onclick = () => { $('folhaDet').classList.remove('aberta'); abertaId = null; };
+$('btnCopiar').onclick = async () => { try { await navigator.clipboard.writeText($('detTexto').textContent); $('btnCopiar').textContent = 'Copiado'; setTimeout(() => $('btnCopiar').textContent = 'Copiar', 1500); } catch {} };
+$('btnCompartilhar').onclick = () => { const t = $('detTexto').textContent; if (navigator.share) navigator.share({ text: t }).catch(() => {}); };
+$('btnRefazer').onclick = async () => {
+  const g = await mudar(abertaId, x => x.segs.forEach(s => { if (s && s.wav) { s.estado = 'pendente'; s.texto = ''; } }));
+  if (!g) return;
+  $('detTexto').textContent = 'Convertendo...';
+  g.segs.forEach((s, i) => s && s.estado === 'pendente' && transcrever(g.id, i));
+};
+$('btnApagar').onclick = async () => { if (confirm('Apagar esta gravação e o áudio?')) { await apagar(abertaId); $('folhaDet').classList.remove('aberta'); abertaId = null; render(); } };
+
+function abrirCfg(msg = '') {
+  $('cfgChave').value = cfg.chave; $('cfgTela').value = cfg.tela;
+  $('cfgStatus').textContent = msg; $('cfgStatus').className = 'nota';
+  $('folhaCfg').classList.add('aberta');
+}
+$('btnConfig').onclick = () => abrirCfg();
+$('btnFecharCfg').onclick = () => $('folhaCfg').classList.remove('aberta');
+$('btnSalvarCfg').onclick = async () => {
+  const k = $('cfgChave').value.trim();
+  cfg.set('grav_chave_mistral', k); cfg.set('grav_tela', $('cfgTela').value);
+  const s = $('cfgStatus'); s.className = 'nota'; s.textContent = 'Testando...';
+  try {
+    const r = await fetch('https://api.mistral.ai/v1/models', { headers: { Authorization: 'Bearer ' + k } });
+    if (r.ok) { s.textContent = 'Chave funcionando.'; s.className = 'nota ok'; }
+    else { s.textContent = 'Falhou: ' + traduzir(r.status + ' '); s.className = 'nota erro'; }
+  } catch { s.textContent = 'Sem conexão com a Mistral.'; s.className = 'nota erro'; }
+};
+
+document.addEventListener('visibilitychange', async () => {
+  if (gravando && document.visibilityState === 'visible') { desenhar(); if (!travaTela) await pedirTela(); }
+});
+
+// ao abrir, termina o que ficou pendente (ex.: estava sem internet)
+abrirBanco().then(async () => {
+  render();
+  for (const g of await todas()) g.segs.forEach((s, i) => { if (s && s.wav && s.estado !== 'feito') transcrever(g.id, i); });
+});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
