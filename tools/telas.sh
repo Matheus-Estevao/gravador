@@ -103,6 +103,7 @@ shot 43-mais-tarde 10
 depois=$(adb shell dumpsys package $P | grep lastUpdateTime)
 { echo "antes: $antes"; echo "depois: $depois"; } > $OUT/atualizacao.txt
 adb logcat -d | grep -iE "PackageInstaller|InstallStart|gravador" | tail -60 >> $OUT/atualizacao.txt
+pkill -f "http.server 8099" || true
 adb logcat -d -s AndroidRuntime:E > $OUT/erros.txt || true
 echo "fim do roteiro" >> $OUT/erros.txt
 exit 0
