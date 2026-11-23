@@ -122,7 +122,7 @@ sealed class Bloco {
 }
 
 /** Falas seguidas da mesma pessoa, sem ninguém no meio. */
-data class Turno(val quem: String, val falas: List<Fala>) : Bloco() {
+data class Turno(val quem: String, override val falas: List<Fala>) : Bloco() {
     override val ini get() = falas.first().ini
     override val fim get() = falas.maxOf { it.fim }
 }
