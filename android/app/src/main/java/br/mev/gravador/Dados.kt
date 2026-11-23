@@ -43,7 +43,7 @@ data class Gravacao(
     val chave: String get() = chaveDe(nome, tamanho)
     val titulo: String get() = nome.substringBeforeLast('.')
     val quando: Long get() = dataDoNome(nome) ?: Datas.de(chave) ?: modificado
-    val ehChamada: Boolean get() = pasta.equals("Call", true)
+    val ehChamada: Boolean get() = pasta.equals("Call", true) || nome.startsWith("Call recording", true)
     /** Nome bonito: em chamada, tira "Call recording" e a data do fim. */
     val exibicao: String get() = if (!ehChamada) titulo else contatoDaChamada(titulo)
 }
@@ -125,7 +125,8 @@ object Pasta {
         }
     }
 
-    private fun ehAudio(nome: String, mime: String) = mime.startsWith("audio") || nome.substringAfterLast('.', "").lowercase() in EXT_AUDIO
+    // ".trashed-..." e ".pending-..." são arquivos escondidos do Android (lixeira): não aparecem
+    private fun ehAudio(nome: String, mime: String) = !nome.startsWith(".") && mime.startsWith("audio") || nome.substringAfterLast('.', "").lowercase() in EXT_AUDIO
 
     /** Todas as subpastas com as gravações de cada uma, mais recentes primeiro. */
     fun listarTudo(ctx: Context): List<Pair<Pastinha, List<Gravacao>>> {
