@@ -1,0 +1,64 @@
+name: APK do Gravador
+on:
+  push:
+    branches: [main]
+    paths: ['android/**', '.github/workflows/apk.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Compilar
+        working-directory: android
+        env:
+          BUILD_NUM: ${{ github.run_number }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          mkdir -p ../saida
+          cp app/build/outputs/apk/release/app-release-unsigned.apk ../saida/Gravador-sem-assinatura.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: apk, path: saida/Gravador-sem-assinatura.apk }
+
+  telas:
+    needs: apk
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: apk, path: saida }
+      - name: Liberar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - name: Assinar com chave de teste (só pro emulador)
+        run: |
+          keytool -genkeypair -keystore t.jks -alias t -keyalg RSA -keysize 2048 -validity 30 -storepass testes -keypass testes -dname CN=teste
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/zipalign -f 4 saida/Gravador-sem-assinatura.apk a.apk
+          $BT/apksigner sign --ks t.jks --ks-pass pass:testes --out teste.apk a.apk
+      - name: Emulador e prints
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: bash tools/telas.sh teste.apk prints
+      - name: Publicar
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          N=${{ github.run_number }}
+          ls prints || true
+          gh release create build-$N saida/Gravador-sem-assinatura.apk prints/* --title "Gravador build $N" --notes "APK sem assinatura + prints do emulador" --prerelease || \
+          gh release upload build-$N saida/Gravador-sem-assinatura.apk prints/* --clobber
