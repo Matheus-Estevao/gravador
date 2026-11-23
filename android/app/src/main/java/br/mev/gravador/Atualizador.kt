@@ -1,12 +1,8 @@
 package br.mev.gravador
 
-import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageInstaller
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +15,10 @@ import java.util.concurrent.TimeUnit
 
 /** Atualiza o app por dentro: baixa o APK assinado do GitHub e instala por cima. */
 object Atualizador {
-    private const val BASE = "https://raw.githubusercontent.com/Matheus-Estevao/gravador/atualizacao/"
+    private const val PADRAO = "https://raw.githubusercontent.com/Matheus-Estevao/gravador/atualizacao/"
+    /** Só pra teste no emulador (extra url_atualizacao); no celular é sempre o GitHub. */
+    var base = PADRAO
+    private val BASE get() = base
 
     sealed class Est {
         data object Nada : Est()
@@ -37,7 +36,7 @@ object Atualizador {
     private val http = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
 
     fun procurar() {
-        if (Prefs.demo) return
+        if (Prefs.demo && base == PADRAO) return
         val e = estado.value
         if (e is Est.Baixando || e is Est.Instalando || e is Est.Procurando) return
         estado.value = Est.Procurando
@@ -76,40 +75,23 @@ object Atualizador {
                     } }
                 }
                 estado.value = Est.Instalando
-                withContext(Dispatchers.IO) { instalar(ctx, f) }
+                withContext(Dispatchers.Main) { instalar(ctx, f) }
             } catch (e: Exception) { estado.value = Est.Erro("Não deu pra baixar: ${e.message ?: "erro"}") }
         }
     }
 
+    /** Entrega o arquivo pro instalador padrão do Android (o mesmo de abrir o APK pelo gerenciador de arquivos). */
     private fun instalar(ctx: Context, f: File) {
-        val inst = ctx.packageManager.packageInstaller
-        val p = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
-            setAppPackageName(ctx.packageName)
-            if (Build.VERSION.SDK_INT >= 31) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-        }
-        val id = inst.createSession(p)
-        inst.openSession(id).use { s ->
-            s.openWrite("app.apk", 0, f.length()).use { o -> f.inputStream().use { it.copyTo(o) }; s.fsync(o) }
-            val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-            val pi = PendingIntent.getBroadcast(ctx, id, Intent(ctx, Instalou::class.java), flags)
-            s.commit(pi.intentSender)
-        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.arquivos", f)
+        val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+        ctx.startActivity(i)
     }
+
+    /** Voltou pro app sem ter atualizado (cancelou): mostra o botão de novo. */
+    fun voltou() { if (estado.value == Est.Instalando) estado.value = Est.Disponivel(ultimo) }
 
     /** Volta pra "tem versão nova" quando a instalação é cancelada (o app só fecha quando dá certo). */
     fun falhou(msg: String?) { estado.value = if (msg == null) Est.Disponivel(ultimo) else Est.Erro(msg) }
 }
 
-class Instalou : BroadcastReceiver() {
-    override fun onReceive(ctx: Context, i: Intent) {
-        when (i.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)) {
-            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION") val confirma = i.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)
-                confirma?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { ctx.startActivity(it) }
-            }
-            PackageInstaller.STATUS_SUCCESS -> Unit
-            PackageInstaller.STATUS_FAILURE_ABORTED -> Atualizador.falhou(null)
-            else -> Atualizador.falhou("Não instalou: " + (i.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "erro"))
-        }
-    }
-}

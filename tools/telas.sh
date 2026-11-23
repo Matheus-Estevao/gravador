@@ -89,6 +89,20 @@ toca "Allow"; shot 33-depois-lixeira 4
 pasta "depois de apagar Voz 261121 (lixeira)"
 adb shell content query --uri content://media/external/audio/media --projection _display_name:is_trashed --where "is_trashed=1" >> $OUT/pastas.txt 2>&1 || true
 read X Y <<< "$(python3 tools/ui.py desc ajustes)"; adb shell input tap $X $Y; shot 34-ajustes-atualizacao 5
+# ===== botão Atualizar: servidor falso no computador do emulador com "versão nova" =====
+mkdir -p srv; cp $APK srv/Gravador.apk; echo 99999 > srv/versao.txt
+( cd srv && python3 -m http.server 8099 >/dev/null 2>&1 & )
+sleep 2
+adb shell appops set $P REQUEST_INSTALL_PACKAGES allow
+antes=$(adb shell dumpsys package $P | grep lastUpdateTime)
+adb shell am force-stop $P; sleep 1
+adb shell am start -n $P/.MainActivity --ez demo false --es url_atualizacao http://10.0.2.2:8099/; shot 40-tem-versao-nova 8
+toca "Atualizar"; shot 41-instalador 12
+toca "Update"; shot 42-depois-de-atualizar 20
+shot 43-mais-tarde 10
+depois=$(adb shell dumpsys package $P | grep lastUpdateTime)
+{ echo "antes: $antes"; echo "depois: $depois"; } > $OUT/atualizacao.txt
+adb logcat -d | grep -iE "PackageInstaller|InstallStart|gravador" | tail -60 >> $OUT/atualizacao.txt
 adb logcat -d -s AndroidRuntime:E > $OUT/erros.txt || true
 echo "fim do roteiro" >> $OUT/erros.txt
 exit 0

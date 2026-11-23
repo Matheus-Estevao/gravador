@@ -8,7 +8,8 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Tema"
-        android:allowBackup="false">
+        android:allowBackup="false"
+        android:networkSecurityConfig="@xml/rede">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -19,6 +20,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <receiver android:name=".Instalou" android:exported="false" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.arquivos"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/caminhos" />
+        </provider>
     </application>
 </manifest>

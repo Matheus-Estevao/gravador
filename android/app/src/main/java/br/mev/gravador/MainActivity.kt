@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
                 else -> Tela.Lista
             }
         }
+        intent?.getStringExtra("url_atualizacao")?.let { Atualizador.base = it }
         val abrirCompartilhar = Prefs.demo && intent?.getStringExtra("tela") == "compartilhar"
         filtroDemo = Prefs.demo && intent?.getStringExtra("tela") == "filtro"
         val demoPos = if (Prefs.demo) intent?.getIntExtra("pos", -1) ?: -1 else -1
@@ -111,6 +112,7 @@ fun App(inicial: Tela, abrirCompartilhar: Boolean, demoPos: Int = -1) {
             temPasta = Pasta.temAcesso(ctx); recarregar++
             // voltou da tela de permissão de instalar: continua a atualização
             if (Atualizador.estado.value == Atualizador.Est.PrecisaPermitir && ctx.packageManager.canRequestPackageInstalls()) Atualizador.atualizar(ctx)
+            else Atualizador.voltou()
         } else if (e == Lifecycle.Event.ON_STOP) tocador.pausar() }
         dono.lifecycle.addObserver(o); onDispose { dono.lifecycle.removeObserver(o) }
     }
