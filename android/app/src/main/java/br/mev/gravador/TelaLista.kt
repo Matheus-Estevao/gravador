@@ -218,6 +218,7 @@ fun TelaLista(
                     }
                 }
             }
+            item { PainelAtualizacao(sempre = false) }
             if (temPasta && Prefs.chave.isBlank() && !Prefs.demo) {
                 item {
                     Cartao(Modifier.fillMaxWidth(), borda = Cor.laranjaBorda) {

@@ -85,6 +85,7 @@ segura "Voz 261121"; sleep 1; toca "Apagar"; shot 32-lixeira-pergunta 3
 toca "Allow"; shot 33-depois-lixeira 4
 pasta "depois de apagar Voz 261121 (lixeira)"
 adb shell content query --uri content://media/external/audio/media --projection _display_name:is_trashed --where "is_trashed=1" >> $OUT/pastas.txt 2>&1 || true
+toca "⚙"; shot 34-ajustes-atualizacao 5
 adb logcat -d -s AndroidRuntime:E > $OUT/erros.txt || true
 echo "fim do roteiro" >> $OUT/erros.txt
 exit 0

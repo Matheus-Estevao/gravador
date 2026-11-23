@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -102,13 +103,18 @@ fun App(inicial: Tela, abrirCompartilhar: Boolean, demoPos: Int = -1) {
     // recarrega a lista quando o app volta pra frente (gravação nova)
     val dono = LocalLifecycleOwner.current
     DisposableEffect(dono) {
-        val o = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) { temPasta = Pasta.temAcesso(ctx); recarregar++ } else if (e == Lifecycle.Event.ON_STOP) tocador.pausar() }
+        val o = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) {
+            temPasta = Pasta.temAcesso(ctx); recarregar++
+            // voltou da tela de permissão de instalar: continua a atualização
+            if (Atualizador.estado.value == Atualizador.Est.PrecisaPermitir && ctx.packageManager.canRequestPackageInstalls()) Atualizador.atualizar(ctx)
+        } else if (e == Lifecycle.Event.ON_STOP) tocador.pausar() }
         dono.lifecycle.addObserver(o); onDispose { dono.lifecycle.removeObserver(o) }
     }
     val escolher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
         r.data?.data?.let { Pasta.guardar(ctx, it); temPasta = true; recarregar++ }
     }
 
+    LaunchedEffect(Unit) { Atualizador.procurar() }
     BackHandler(enabled = pilha.size > 1) { voltar() }
 
     Box(Modifier.fillMaxSize().background(Cor.fundo).safeDrawingPadding()) {
@@ -157,7 +163,45 @@ fun TelaAjustes(onVoltar: () -> Unit, onTrocarPasta: () -> Unit) {
             Spacer(Modifier.width(10.dp))
             BotaoAzul("Trocar", forte = false, onClick = onTrocarPasta)
         }
+        Espaco(18)
+        Text("Atualização", color = Cor.texto, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Espaco(6)
+        PainelAtualizacao(sempre = true)
         Espaco(30)
-        Text("Gravador ${BuildConfig.VERSION_NAME}", color = Cor.sub, fontSize = 12.sp)
+    }
+}
+
+/** Cartão de atualização. Na lista só aparece quando tem versão nova; nos ajustes, sempre. */
+@Composable
+fun PainelAtualizacao(sempre: Boolean) {
+    val ctx = LocalContext.current
+    val e by Atualizador.estado.collectAsState()
+    val aparece = sempre || e is Atualizador.Est.Disponivel || e is Atualizador.Est.Baixando || e is Atualizador.Est.Instalando || e is Atualizador.Est.PrecisaPermitir
+    if (!aparece) return
+    val versao = "Você está no build ${BuildConfig.VERSION_CODE}"
+    val (texto, botao) = when (val x = e) {
+        is Atualizador.Est.Disponivel -> "Versão nova: build ${x.build}" to "Atualizar"
+        is Atualizador.Est.Baixando -> "Baixando build ${x.build}… ${x.pct}%" to null
+        Atualizador.Est.Instalando -> "Instalando… confirme se o Android pedir" to null
+        Atualizador.Est.PrecisaPermitir -> "Ligue \"Permitir desta fonte\" e volte aqui" to "Tentar de novo"
+        Atualizador.Est.Procurando -> "$versao · procurando…" to null
+        Atualizador.Est.EmDia -> "$versao · está em dia" to "Procurar"
+        is Atualizador.Est.Erro -> x.msg to "Procurar de novo"
+        Atualizador.Est.Nada -> versao to "Procurar"
+    }
+    val destaque = e is Atualizador.Est.Disponivel || e is Atualizador.Est.Baixando || e is Atualizador.Est.Instalando
+    Cartao(Modifier.fillMaxWidth(), borda = if (destaque) Cor.azul else Cor.linha) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(texto, color = if (destaque) Cor.texto else Cor.sub, fontSize = 13.5.sp, modifier = Modifier.weight(1f))
+            if (botao != null) {
+                Spacer(Modifier.width(10.dp))
+                BotaoAzul(botao, forte = destaque) {
+                    when (e) {
+                        is Atualizador.Est.Disponivel, Atualizador.Est.PrecisaPermitir -> Atualizador.atualizar(ctx)
+                        else -> Atualizador.procurar()
+                    }
+                }
+            }
+        }
     }
 }
