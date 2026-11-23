@@ -16,6 +16,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -108,10 +110,11 @@ fun TelaLista(
         if (emDemo()) return
         escopo.launch {
             val uris = withContext(Dispatchers.IO) { if (Build.VERSION.SDK_INT >= 30) Arquivos.paraLixeira(ctx, gs) else null }
-            if (uris != null && Build.VERSION.SDK_INT >= 30) {
-                val pi = MediaStore.createTrashRequest(ctx.contentResolver, uris, true)
-                lixeira.launch(IntentSenderRequest.Builder(pi.intentSender).build())
-            } else confirmarApagar = gs
+            val pedido = if (uris != null && Build.VERSION.SDK_INT >= 30) try {
+                MediaStore.createTrashRequest(ctx.contentResolver, uris, true)
+            } catch (e: Exception) { null } else null
+            if (pedido != null) lixeira.launch(IntentSenderRequest.Builder(pedido.intentSender).build())
+            else confirmarApagar = gs
         }
     }
 
@@ -174,16 +177,17 @@ fun TelaLista(
 
         // abas: uma por pasta de Recordings
         if (pastas.size > 1) {
+            val poucas = pastas.size <= 2
             Row(
                 Modifier.padding(start = 18.dp, end = 18.dp, top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Cor.cartao)
-                    .border(1.dp, Cor.linha, RoundedCornerShape(14.dp)).padding(4.dp),
+                    .border(1.dp, Cor.linha, RoundedCornerShape(14.dp)).then(if (poucas) Modifier else Modifier.horizontalScroll(rememberScrollState())).padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                pastas.take(4).forEach { (p, gs) ->
+                pastas.forEach { (p, gs) ->
                     val ativa = p.nome == aba?.first?.nome
                     Box(
-                        Modifier.weight(1f).clip(RoundedCornerShape(11.dp)).background(if (ativa) Cor.azul2 else Color.Transparent)
-                            .clickable { abaNome = p.nome; escopo.launch { lista.scrollToItem(0) } }.padding(vertical = 9.dp),
+                        (if (poucas) Modifier.weight(1f) else Modifier.padding(horizontal = 2.dp)).clip(RoundedCornerShape(11.dp)).background(if (ativa) Cor.azul2 else Color.Transparent)
+                            .clickable { abaNome = p.nome; escopo.launch { lista.scrollToItem(0) } }.padding(vertical = 9.dp, horizontal = if (poucas) 0.dp else 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text("${p.rotulo}  ${gs.size}", color = if (ativa) Cor.texto else Cor.sub, fontSize = 13.5.sp,
@@ -191,8 +195,6 @@ fun TelaLista(
                     }
                 }
             }
-            if (pastas.size > 4) Text("+ ${pastas.drop(4).joinToString { it.first.nome }}", color = Cor.sub, fontSize = 12.sp,
-                modifier = Modifier.padding(start = 22.dp, top = 4.dp).clickable { abaNome = pastas[4].first.nome })
         }
 
         LazyColumn(

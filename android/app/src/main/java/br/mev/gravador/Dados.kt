@@ -42,7 +42,7 @@ data class Gravacao(
 ) {
     val chave: String get() = chaveDe(nome, tamanho)
     val titulo: String get() = nome.substringBeforeLast('.')
-    val quando: Long get() = dataDoNome(nome) ?: modificado
+    val quando: Long get() = dataDoNome(nome) ?: Datas.de(chave) ?: modificado
     val ehChamada: Boolean get() = pasta.equals("Call", true)
     /** Nome bonito: em chamada, tira "Call recording" e a data do fim. */
     val exibicao: String get() = if (!ehChamada) titulo else contatoDaChamada(titulo)
@@ -184,6 +184,7 @@ object Arquivos {
         if (nome.isBlank() || nome == g.nome) return null
         val u = DocumentsContract.renameDocument(ctx.contentResolver, g.uri, nome) ?: return null
         val nova = g.copy(uri = u, nome = nome)
+        Datas.guardar(nova.chave, g.quando) // nome novo sem data: guarda a data da gravação
         Banco.migrar(g, nova)
         return nova
     }
@@ -217,12 +218,26 @@ object Arquivos {
 
     /** Endereços da lixeira do Android (MediaStore). Null se algum arquivo não estiver no MediaStore. */
     fun paraLixeira(ctx: Context, gs: List<Gravacao>): List<Uri>? = try {
-        gs.map { MediaStore.getMediaUri(ctx, it.uri) ?: return null }
+        gs.map { g ->
+            // getMediaUri devolve o endereço genérico (.../file/ID); a lixeira só aceita o de áudio (.../audio/media/ID)
+            val m = MediaStore.getMediaUri(ctx, g.uri) ?: return null
+            val id = m.lastPathSegment?.toLongOrNull() ?: return null
+            val vol = m.pathSegments.firstOrNull() ?: MediaStore.VOLUME_EXTERNAL_PRIMARY
+            android.content.ContentUris.withAppendedId(MediaStore.Audio.Media.getContentUri(vol), id)
+        }
     } catch (e: Exception) { null }
 
     fun apagarDeVez(ctx: Context, gs: List<Gravacao>): Int = gs.count { g ->
         try { DocumentsContract.deleteDocument(ctx.contentResolver, g.uri) } catch (e: Exception) { false }
     }
+}
+
+/** Data original de gravações renomeadas pra um nome sem data. */
+object Datas {
+    private val f get() = File(App.app.filesDir, "datas.json")
+    private val mapa: JSONObject by lazy { try { JSONObject(f.readText()) } catch (e: Exception) { JSONObject() } }
+    @Synchronized fun de(chave: String): Long? = if (mapa.has(chave)) mapa.getLong(chave) else null
+    @Synchronized fun guardar(chave: String, quando: Long) { mapa.put(chave, quando); f.writeText(mapa.toString()) }
 }
 
 object Banco {
