@@ -2,7 +2,7 @@ name: APK do Gravador
 on:
   push:
     branches: [main]
-    paths: ['android/**', '.github/workflows/apk.yml']
+    paths: ['android/**', 'tools/**', '.github/workflows/apk.yml']
   workflow_dispatch:
 permissions:
   contents: write
