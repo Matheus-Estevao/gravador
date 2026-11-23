@@ -14,9 +14,17 @@ abrir --es tela conversa --ei pos 65; shot 3-conversa-fim 7
 abrir --es tela editar; shot 4-editar 7
 abrir --es tela compartilhar; shot 5-compartilhar 7
 abrir --es tela ajustes; shot 6-ajustes 5
-# toque numa palavra e arraste: só pra ver se não quebra
+# arrastar a linha do áudio: print no meio do arraste (texto deve acompanhar)
 abrir --es tela conversa --ei pos 2; sleep 6
-adb shell input swipe 300 700 900 700 800; shot 7-depois-de-arrastar 3
+adb shell input swipe 260 545 980 545 3000 &
+sleep 2.2; adb exec-out screencap -p > $OUT/7-no-meio-do-arraste.png
+wait; shot 8-depois-de-arrastar 2
+# tocar numa palavra ("ultrassom", fala das 00:29) com o áudio pausado
+abrir --es tela conversa --ei pos 2; sleep 6
+adb shell input tap 807 2005; shot 9-tocou-palavra-pausado 2
+# tocar play e depois numa palavra: deve continuar tocando
+adb shell input tap 125 545; sleep 1.5
+adb shell input tap 300 1050; shot 10-tocou-palavra-tocando 2
 adb logcat -d -s AndroidRuntime:E > $OUT/erros.txt || true
 echo "fim do roteiro" >> $OUT/erros.txt
 exit 0
