@@ -23,6 +23,14 @@ if modo == "texto":
         if alvo in t and (alvo != "Wait" or t == "Wait"):
             # começo do texto: ajusta pela posição da palavra na linha (aproximado)
             print(x0 + 40, (y0 + y1) // 2 if y1 - y0 < 120 else y0 + 40); break
+elif modo == "itexto":
+    # sem diferenciar maiúscula (botões do Android vêm em CAIXA ALTA às vezes); pega o centro
+    alvo = sys.argv[2].lower()
+    todos = list(nos(xml))
+    achado = [b for t, b in todos if t.strip().lower() == alvo] or [b for t, b in todos if alvo in t.lower()]
+    if achado:
+        x0, y0, x1, y1 = achado[0]
+        print((x0 + x1) // 2, (y0 + y1) // 2)
 elif modo == "faixas":
     d = dens()
     for t, (x0, y0, x1, y1) in nos(xml):

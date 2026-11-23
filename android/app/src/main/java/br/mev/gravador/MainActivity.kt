@@ -92,10 +92,12 @@ fun App(inicial: Tela, abrirCompartilhar: Boolean, demoPos: Int = -1) {
     fun voltar() { if (pilha.size > 1) pilha = pilha.dropLast(1) }
 
     var temPasta by remember { mutableStateOf(Pasta.temAcesso(ctx)) }
-    var gravacoes by remember { mutableStateOf(emptyList<Gravacao>()) }
+    var pastas by remember { mutableStateOf(emptyList<Pair<Pastinha, List<Gravacao>>>()) }
+    var precisaRecordings by remember { mutableStateOf(false) }
     var recarregar by remember { mutableIntStateOf(0) }
     LaunchedEffect(temPasta, recarregar) {
-        if (temPasta) gravacoes = withContext(Dispatchers.IO) { Pasta.listar(ctx) }
+        if (temPasta) pastas = withContext(Dispatchers.IO) { Pasta.listarTudo(ctx) }
+        precisaRecordings = temPasta && (Pasta.soUmaPasta() || !Pasta.podeMexer(ctx))
     }
     // recarrega a lista quando o app volta pra frente (gravação nova)
     val dono = LocalLifecycleOwner.current
@@ -111,7 +113,7 @@ fun App(inicial: Tela, abrirCompartilhar: Boolean, demoPos: Int = -1) {
 
     Box(Modifier.fillMaxSize().background(Cor.fundo).safeDrawingPadding()) {
         when (val t = tela) {
-            Tela.Lista -> TelaLista(gravacoes, temPasta, { escolher.launch(Pasta.intentEscolher()) }, { g -> ir(Tela.Conversa(g.chave)) }, { ir(Tela.Ajustes) })
+            Tela.Lista -> TelaLista(pastas, temPasta, precisaRecordings, { escolher.launch(Pasta.intentEscolher()) }, { g -> ir(Tela.Conversa(g.chave)) }, { ir(Tela.Ajustes) }, { recarregar++ })
             Tela.Ajustes -> TelaAjustes(onVoltar = { voltar() }, onTrocarPasta = { escolher.launch(Pasta.intentEscolher()) })
             is Tela.Conversa -> TelaConversa(t.chave, tocador, abrirCompartilhar, onVoltar = { tocador.pausar(); voltar() }, onEditar = { ids -> ir(Tela.Editar(t.chave, ids)) })
             is Tela.Editar -> TelaEditar(t.chave, t.ids, tocador) { voltar() }

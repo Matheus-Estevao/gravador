@@ -43,6 +43,48 @@ read YF YV <<< "$(python3 tools/ui.py faixas)"
 adb shell input swipe 150 $YV 800 $YV 2000 &
 sleep 1.4; adb exec-out screencap -p > $OUT/13-arrastando-visao-geral.png
 wait; shot 14-depois-visao-geral 2
+
+# ===== pastas de verdade: Recordings/Call e Recordings/Voice Recorder =====
+R=/sdcard/Recordings
+adb shell "mkdir -p '$R/Voice Recorder' '$R/Call'"
+for f in tools/amostras/Voz*.m4a; do adb push "$f" "$R/Voice Recorder/"; done
+for f in tools/amostras/Call*.m4a; do adb push "$f" "$R/Call/"; done
+adb shell content call --uri content://media --method scan_volume --arg external_primary || true
+sleep 4
+pasta() { echo "== $1"; adb shell ls -R "$R" ; } >> $OUT/pastas.txt
+pasta "antes"
+toca() { read X Y <<< "$(python3 tools/ui.py itexto "$1")"; echo "tocar '$1' em $X $Y"; [ -n "$X" ] && adb shell input tap $X $Y; }
+segura() { read X Y <<< "$(python3 tools/ui.py itexto "$1")"; echo "segurar '$1' em $X $Y"; [ -n "$X" ] && adb shell input swipe $X $Y $X $Y 900; }
+adb shell am force-stop $P; sleep 1
+adb shell am start -n $P/.MainActivity --ez demo false; shot 20-sem-pasta 6
+toca "Liberar Recordings"; shot 21-seletor 5
+toca "Use this folder"; sleep 3; shot 22-permitir 1
+toca "Allow"; shot 23-aba-gravador 6
+toca "Chamadas"; shot 24-aba-chamadas 3
+# renomear
+segura "Vivo"; shot 25-selecionada 2
+toca "Renomear"; sleep 2
+read X Y <<< "$(python3 tools/ui.py itexto "Call recording Vivo")"; adb shell input tap $X $Y; sleep 1
+adb shell input keyevent KEYCODE_MOVE_END
+adb shell input keyevent $(for i in $(seq 1 45); do printf 'KEYCODE_DEL '; done)
+adb shell input text "Conta_da_Vivo"; shot 26-renomeando 2
+toca "Salvar"; shot 27-renomeado 4
+pasta "depois de renomear Vivo -> Conta_da_Vivo"
+# mover uma chamada pro Gravador
+segura "Dra Ana"; sleep 1; toca "Mover"; shot 28-mover-pra 3
+toca "Gravador"; shot 29-movido 4
+pasta "depois de mover Dra Ana pra Voice Recorder"
+# nova pasta
+segura "Pai"; sleep 1; toca "Mover"; sleep 2; toca "Nova pasta"; sleep 2
+adb shell input text "Familia"; shot 30-nova-pasta 2
+toca "Salvar"; shot 31-depois-nova-pasta 5
+pasta "depois de mover Pai pra nova pasta Familia"
+# apagar (lixeira do Android)
+toca "Gravador"; sleep 3
+segura "Voz 261121"; sleep 1; toca "Apagar"; shot 32-lixeira-pergunta 3
+toca "Allow"; shot 33-depois-lixeira 4
+pasta "depois de apagar Voz 261121 (lixeira)"
+adb shell content query --uri content://media/external/audio/media --projection _display_name:is_trashed --where "is_trashed=1" >> $OUT/pastas.txt 2>&1 || true
 adb logcat -d -s AndroidRuntime:E > $OUT/erros.txt || true
 echo "fim do roteiro" >> $OUT/erros.txt
 exit 0

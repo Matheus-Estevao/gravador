@@ -42,6 +42,20 @@ object Demo {
         }
     }
 
+    private val chamadas = listOf(
+        "Call recording Pai_261123_110233.m4a", "Call recording Dra Ana_261122_163010.m4a", "Call recording +5583988102077_261122_091544.m4a",
+        "Call recording Vivo_261121_140102.m4a", "Call recording Pai_261120_193320.m4a",
+    )
+
+    /** As duas pastas, como no celular (modo demonstração: não mexe em arquivo de verdade). */
+    fun pastas(ctx: Context): List<Pair<Pastinha, List<Gravacao>>> {
+        val f = Uri.fromFile(audio(ctx))
+        val vr = Pastinha("Voice Recorder", Uri.parse("demo:vr")); val ca = Pastinha("Call", Uri.parse("demo:call"))
+        val gs = gravacoes(ctx).map { it.copy(pastaUri = vr.uri) }
+        val cs = chamadas.mapIndexed { i, n -> Gravacao(f, n, 5000L + i, dataDoNome(n) ?: 0L, "Call", ca.uri) }
+        return listOf(vr to gs, ca to cs)
+    }
+
     fun semear(ctx: Context) {
         val g = gravacoes(ctx)[1]
         if (Banco.ler(g.chave) == null) Banco.salvar(transcrever(g).copy(titulo = "Consulta Dr. Paulo", nomes = mapOf("speaker_1" to "Dr. Paulo", "speaker_2" to "Matheus")))
