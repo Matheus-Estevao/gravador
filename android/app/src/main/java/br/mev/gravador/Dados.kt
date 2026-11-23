@@ -126,7 +126,7 @@ object Pasta {
     }
 
     // ".trashed-..." e ".pending-..." são arquivos escondidos do Android (lixeira): não aparecem
-    private fun ehAudio(nome: String, mime: String) = !nome.startsWith(".") && mime.startsWith("audio") || nome.substringAfterLast('.', "").lowercase() in EXT_AUDIO
+    private fun ehAudio(nome: String, mime: String) = !nome.startsWith(".") && (mime.startsWith("audio") || nome.substringAfterLast('.', "").lowercase() in EXT_AUDIO)
 
     /** Todas as subpastas com as gravações de cada uma, mais recentes primeiro. */
     fun listarTudo(ctx: Context): List<Pair<Pastinha, List<Gravacao>>> {
