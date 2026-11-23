@@ -112,9 +112,9 @@ fun TelaConversa(
     var auto by remember { mutableStateOf(false) }
     LaunchedEffect(lista) { snapshotFlow { lista.isScrollInProgress }.collect { if (it && !auto) dedoEm = System.currentTimeMillis() } }
     val alvo = remember(pos, itens) { itens.indexOfFirst { it.fim > pos }.let { if (it < 0) itens.lastIndex else it } }
-    val acompanhar = tocador.tocando || cabeca.arrastando
-    LaunchedEffect(alvo, acompanhar) {
-        if (!acompanhar || alvo < 0) return@LaunchedEffect
+    // acompanha tocando, arrastando ou quando você pula (↺5, visão geral, palavra); parado lendo, não mexe
+    LaunchedEffect(alvo) {
+        if (alvo < 0) return@LaunchedEffect
         if (System.currentTimeMillis() - dedoEm < 3500 && !cabeca.arrastando) return@LaunchedEffect
         val info = lista.layoutInfo
         val v = info.visibleItemsInfo.firstOrNull { it.index == alvo }
