@@ -24,6 +24,13 @@ object Icones {
         }
         return b.build()
     }
+    private fun cheio(nome: String, d: String): ImageVector =
+        ImageVector.Builder(nome, 24.dp, 24.dp, 24f, 24f).addPath(addPathNodes(d), fill = SolidColor(Color.Black)).build()
+    val voltar = icone("voltar", "M15 5l-7 7 7 7")
+    val play = cheio("play", "M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z")
+    val pausa = cheio("pausa", "M7 5h3.5v14H7zM13.5 5H17v14h-3.5z")
+    val tras = icone("tras", "M4.5 12a7.5 7.5 0 1 0 2.2-5.3", "M4 4v4h4")
+    val frente = icone("frente", "M19.5 12a7.5 7.5 0 1 1-2.2-5.3", "M20 4v4h-4")
     val mic = icone("mic", "M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3z", "M5 11a7 7 0 0 0 14 0M12 18v3")
     val fone = icone("fone", "M5 4h3.5l1.5 4-2 1.3a11 11 0 0 0 6.7 6.7L16 14l4 1.5V19a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z")
     val pasta = icone("pasta", "M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z")
@@ -42,5 +49,5 @@ object Icones {
 }
 
 @Composable
-fun Ic(v: ImageVector, cor: Color, tamanho: Dp = 18.dp, modifier: Modifier = Modifier) =
-    Icon(v, contentDescription = null, tint = cor, modifier = modifier.size(tamanho))
+fun Ic(v: ImageVector, cor: Color, tamanho: Dp = 18.dp, modifier: Modifier = Modifier, desc: String? = null) =
+    Icon(v, contentDescription = desc, tint = cor, modifier = modifier.size(tamanho))

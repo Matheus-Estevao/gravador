@@ -31,8 +31,12 @@ elif modo == "itexto":
     if achado:
         x0, y0, x1, y1 = achado[0]
         print((x0 + x1) // 2, (y0 + y1) // 2)
+elif modo == "desc":
+    for m in re.finditer(r'<node [^>]*?content-desc="([^"]*)"[^>]*?bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', xml):
+        if m.group(1) == sys.argv[2]:
+            x0, y0, x1, y1 = (int(m.group(i)) for i in range(2, 6)); print((x0 + x1) // 2, (y0 + y1) // 2); break
 elif modo == "faixas":
     d = dens()
     for t, (x0, y0, x1, y1) in nos(xml):
-        if t == "↺5":
-            print(int(y0 - 59 * d), int(y0 - 19 * d)); break
+        if t.startswith(" / "):  # tempo total, na linha do play
+            print(int(y0 - 73 * d), int(y0 - 29 * d)); break

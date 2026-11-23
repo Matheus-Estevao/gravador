@@ -40,7 +40,7 @@ abrir --es tela conversa --ei pos 2; sleep 6
 read X Y <<< "$(python3 tools/ui.py texto 'Faz umas duas')"; echo "palavra em $X $Y"
 adb shell input tap $X $Y; shot 9-tocou-palavra-pausado 2
 # play e depois tocar numa palavra: deve continuar tocando
-read X2 Y2 <<< "$(python3 tools/ui.py texto '▶')"; adb shell input tap $X2 $Y2; sleep 1.5
+read X2 Y2 <<< "$(python3 tools/ui.py desc Tocar)"; adb shell input tap $X2 $Y2; sleep 1.5
 read X Y <<< "$(python3 tools/ui.py texto 'Certo. Vou pedir')"; adb shell input tap $X $Y; shot 10-tocou-palavra-tocando 2
 # visão geral da gravação inteira: arrastar pula direto
 abrir --es tela prova --ei pos 100; sleep 6
@@ -88,7 +88,7 @@ segura "Voz 261121"; sleep 1; toca "Apagar"; shot 32-lixeira-pergunta 3
 toca "Allow"; shot 33-depois-lixeira 4
 pasta "depois de apagar Voz 261121 (lixeira)"
 adb shell content query --uri content://media/external/audio/media --projection _display_name:is_trashed --where "is_trashed=1" >> $OUT/pastas.txt 2>&1 || true
-toca "⚙"; shot 34-ajustes-atualizacao 5
+read X Y <<< "$(python3 tools/ui.py desc ajustes)"; adb shell input tap $X $Y; shot 34-ajustes-atualizacao 5
 adb logcat -d -s AndroidRuntime:E > $OUT/erros.txt || true
 echo "fim do roteiro" >> $OUT/erros.txt
 exit 0

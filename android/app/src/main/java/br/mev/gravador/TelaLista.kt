@@ -185,7 +185,7 @@ fun TelaLista(
                             }
                             if (busca.isNotEmpty()) Box(Modifier.clip(CircleShape).clickable { busca = "" }.padding(6.dp)) { Ic(Icones.fechar, Cor.sub, 16.dp) }
                             Box(Modifier.clip(CircleShape).clickable { painel = true }.padding(8.dp)) {
-                                Ic(Icones.filtro, if (filtro.ativo) Cor.azul else Cor.texto2, 20.dp)
+                                Ic(Icones.filtro, if (filtro.ativo) Cor.azul else Cor.texto2, 20.dp, desc = "Filtrar")
                                 if (filtro.ativo) Box(Modifier.align(Alignment.TopEnd).size(8.dp).clip(CircleShape).background(Cor.azul))
                             }
                         }
