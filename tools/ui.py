@@ -15,11 +15,12 @@ def dens():
     return int(re.findall(r"\d+", out)[-1]) / 160
 
 xml = dump()
+if "--debug" in sys.argv: print(xml[:3000], file=sys.stderr)
 modo = sys.argv[1]
 if modo == "texto":
     alvo = sys.argv[2]
     for t, (x0, y0, x1, y1) in nos(xml):
-        if alvo in t:
+        if alvo in t and (alvo != "Wait" or t == "Wait"):
             # começo do texto: ajusta pela posição da palavra na linha (aproximado)
             print(x0 + 40, (y0 + y1) // 2 if y1 - y0 < 120 else y0 + 40); break
 elif modo == "faixas":

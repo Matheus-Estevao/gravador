@@ -4,11 +4,17 @@ set -x
 APK=$1; OUT=$2; mkdir -p $OUT
 P=br.mev.gravador
 adb install -r $APK
+# o launcher do emulador costuma travar no começo e abre um aviso por cima: esconde avisos e espera assentar
+adb shell settings put global hide_error_dialogs 1
+adb shell settings put global anr_show_background 0
+sleep 40
+adb shell input keyevent KEYCODE_HOME; sleep 5
 adb shell settings put system screen_off_timeout 600000
 adb shell cmd uimode night yes
 # letra grande, como no celular dele
 adb shell settings put system font_scale 1.3
-shot() { sleep ${2:-5}; adb exec-out screencap -p > $OUT/$1.png; }
+tira_aviso() { python3 tools/ui.py texto "Wait" | { read X Y && [ -n "$X" ] && adb shell input tap $X $Y; } ; true; }
+shot() { sleep ${2:-5}; tira_aviso; adb exec-out screencap -p > $OUT/$1.png; }
 abrir() { adb shell am force-stop $P; sleep 1; adb shell am start -n $P/.MainActivity --ez demo true "$@"; }
 abrir --es tela lista; shot 1-lista 7
 abrir --es tela conversa --ei pos 23; shot 2-conversa-trecho-junto 7
@@ -20,7 +26,7 @@ abrir --es tela prova --ei pos 130; shot 11-prova-7-vozes 7
 abrir --es tela prova --ei pos 200; shot 12-prova-mais-adiante 7
 # arrastar a linha do áudio: print no meio do arraste (texto deve acompanhar)
 abrir --es tela conversa --ei pos 2; sleep 6
-read YF YV <<< "$(python3 tools/ui.py faixas)"; echo "faixas y=$YF visão geral y=$YV"
+python3 tools/ui.py faixas --debug 2>&1 | head -c 1500; read YF YV <<< "$(python3 tools/ui.py faixas)"; echo "faixas y=$YF visão geral y=$YV"
 adb shell input swipe 200 $YF 950 $YF 3000 &
 sleep 2.2; adb exec-out screencap -p > $OUT/7-no-meio-do-arraste.png
 wait; shot 8-depois-de-arrastar 2
