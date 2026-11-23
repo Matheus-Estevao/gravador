@@ -80,24 +80,11 @@ object Mistral {
             val palavras = (0 until ws.length()).map { ws.getJSONObject(it) }
                 .filter { it.optString("text").isNotBlank() }
                 .map { it.optDouble("start", 0.0) to it.optDouble("end", it.optDouble("start", 0.0)) }
-            falas = alinhar(falas, palavras)
+            falas = alinharPalavras(falas, palavras)
         } catch (e: Exception) { /* fica com o tempo estimado */ }
 
         val d = if (duracao > 0) duracao else (falas.maxOfOrNull { it.fim } ?: 0.0)
         return Conversa(g.chave, g.nome, g.uri.toString(), g.titulo, g.quando, d, emptyMap(), falas)
-    }
-
-    /** Coloca cada palavra na fala em que ela cai. */
-    fun alinhar(falas: List<Fala>, palavras: List<Pair<Double, Double>>): List<Fala> {
-        if (palavras.isEmpty()) return falas
-        val por = HashMap<Int, MutableList<Double>>()
-        for ((a, b) in palavras) {
-            val m = (a + b) / 2
-            val dentro = falas.filter { m >= it.ini - 0.05 && m <= it.fim + 0.05 }
-            val f = dentro.minByOrNull { kotlin.math.abs((it.ini + it.fim) / 2 - m) } ?: continue
-            por.getOrPut(f.id) { mutableListOf() } += a
-        }
-        return falas.map { f -> por[f.id]?.takeIf { it.size >= 2 }?.let { f.copy(wt = it.sorted()) } ?: f }
     }
 
     fun resumir(c: Conversa): String {

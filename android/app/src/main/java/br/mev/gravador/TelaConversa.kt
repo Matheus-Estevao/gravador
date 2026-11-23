@@ -8,15 +8,12 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -30,7 +27,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,6 +56,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -64,6 +64,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,10 +77,10 @@ fun corDe(c: Conversa, quem: String): Color {
     return Cor.vozes[(if (i < 0) c.pessoas.size else i) % Cor.vozes.size]
 }
 
-/** Posição que a tela mostra: a do arraste (se estiver arrastando) ou a do áudio. */
+/** Estado do arraste da linha do áudio. */
 class Cabeca { var arrastando by mutableStateOf(false); var posArraste by mutableStateOf(0.0) }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TelaConversa(
     chave: String,
@@ -90,101 +91,113 @@ fun TelaConversa(
 ) {
     val ctx = LocalContext.current
     val versao by Banco.versao.collectAsState()
-    val c = remember(versao, chave) { Banco.ler(chave) }
-    if (c == null) { LaunchedEffect(Unit) { onVoltar() }; return }
-    val blocos = remember(c) { blocos(c.falas) }
+    val bruta = remember(versao, chave) { Banco.ler(chave) }
+    if (bruta == null) { LaunchedEffect(Unit) { onVoltar() }; return }
+    val c = remember(bruta) { bruta.unificada() }
+    val itens = remember(c) { turnos(blocos(c.falas)) }
     val cabeca = remember { Cabeca() }
     var renomearTitulo by remember { mutableStateOf(false) }
     var renomearPessoa by remember { mutableStateOf<String?>(null) }
     var compartilhar by remember { mutableStateOf(abrirCompartilhar) }
 
     LaunchedEffect(c.uri) { tocador.carregar(c.uri) }
-    // posição lisa: atualiza a cada quadro enquanto toca
     LaunchedEffect(tocador.tocando) { while (tocador.tocando) { withFrameNanos { }; tocador.atualizar() } }
 
     val duracao = if (tocador.duracao > 0) tocador.duracao else c.duracao
     val pos = if (cabeca.arrastando) cabeca.posArraste else tocador.posicao
 
-    // rolagem automática acompanhando o áudio, a menos que você tenha rolado com o dedo há pouco
+    // rolagem automática acompanhando o áudio (para por 3,5 s se você rolar com o dedo)
     val lista = rememberLazyListState()
     var dedoEm by remember { mutableLongStateOf(0L) }
     var auto by remember { mutableStateOf(false) }
     LaunchedEffect(lista) { snapshotFlow { lista.isScrollInProgress }.collect { if (it && !auto) dedoEm = System.currentTimeMillis() } }
-    val alvo = remember(pos, blocos) { blocos.indexOfFirst { it.fim > pos }.let { if (it < 0) blocos.lastIndex else it } }
+    val alvo = remember(pos, itens) { itens.indexOfFirst { it.fim > pos }.let { if (it < 0) itens.lastIndex else it } }
     val acompanhar = tocador.tocando || cabeca.arrastando
     LaunchedEffect(alvo, acompanhar) {
         if (!acompanhar || alvo < 0) return@LaunchedEffect
         if (System.currentTimeMillis() - dedoEm < 3500 && !cabeca.arrastando) return@LaunchedEffect
-        val vis = lista.layoutInfo.visibleItemsInfo
-        val idx = alvo + 1 // item 0 é o cabeçalho
-        val dentro = vis.any { it.index == idx && it.offset >= lista.layoutInfo.viewportStartOffset && it.offset + it.size <= lista.layoutInfo.viewportEndOffset }
-        if (!dentro) {
+        val info = lista.layoutInfo
+        val v = info.visibleItemsInfo.firstOrNull { it.index == alvo }
+        // mantém a fala atual no terço de cima da tela
+        val limite = info.viewportStartOffset + (info.viewportEndOffset - info.viewportStartOffset) / 3
+        if (v == null || v.offset > limite || v.offset + v.size < info.viewportStartOffset + 40) {
             auto = true
-            try { if (cabeca.arrastando) lista.scrollToItem(idx, -80) else lista.animateScrollToItem(idx, -80) } finally { auto = false }
+            try { if (cabeca.arrastando) lista.scrollToItem(alvo, -40) else lista.animateScrollToItem(alvo, -40) } finally { auto = false }
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Redondo("‹", onClick = onVoltar)
-            Spacer(Modifier.weight(1f))
-            Redondo("✎") { renomearTitulo = true }
-            Spacer(Modifier.width(8.dp))
-            Redondo("⇪", forte = true) { compartilhar = true }
+    Column(Modifier.fillMaxSize()) {
+        // cabeçalho compacto
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Redondo("‹", tamanho = 38.dp, onClick = onVoltar)
+            Column(Modifier.weight(1f).padding(horizontal = 10.dp).clickable { renomearTitulo = true }) {
+                Text(c.titulo.ifBlank { c.arquivo }, color = Cor.texto, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${diaCurto(c.quando)} · ${duracaoCurta(duracao)} · ${c.pessoas.size} ${if (c.pessoas.size == 1) "voz" else "vozes"}", color = Cor.sub, fontSize = 12.sp, maxLines = 1)
+            }
+            Redondo("⇪", tamanho = 38.dp, forte = true) { compartilhar = true }
         }
         Espaco(10)
-        Titulo(c.titulo.ifBlank { c.arquivo }, "${diaCurto(c.quando)} · ${duracaoCurta(duracao)}")
-        Espaco(10)
-        Tocadorzinho(c, tocador, cabeca, duracao, pos)
+        Box(Modifier.padding(horizontal = 12.dp)) { Tocadorzinho(c, tocador, cabeca, duracao, pos) }
         Espaco(8)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            c.pessoas.forEach { p -> Pilula(c.nome(p) + if (c.nomes[p].isNullOrBlank()) " ✎" else "", ponto = corDe(c, p)) { renomearPessoa = p } }
+        // pessoas numa linha só, rolando pro lado
+        LazyRow(contentPadding = PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(c.pessoas) { p ->
+                val falando = c.falas.any { it.quem == p && pos >= it.ini && pos < it.fim }
+                Pilula(c.nome(p), ponto = corDe(c, p), borda = if (falando) corDe(c, p) else Cor.linha) { renomearPessoa = p }
+            }
+            item { Pilula("✎ nomes", cor = Cor.sub, fundo = Color.Transparent) { renomearPessoa = c.pessoas.firstOrNull { c.nomes[it].isNullOrBlank() } ?: c.pessoas.firstOrNull() } }
         }
         Espaco(6)
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(), state = lista,
-            contentPadding = PaddingValues(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 160.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item { Spacer(Modifier.height(2.dp)) }
-            itemsIndexed(blocos, key = { _, b -> b.falas.first().id }) { _, b ->
+            items(itens, key = { b -> b.falas.first().id }) { b ->
                 when (b) {
-                    is Bloco.Uma -> LinhaFala(c, b.fala, pos, { tocador.irPara(it) }) { onEditar(listOf(b.fala.id)) }
+                    is Turno -> TurnoView(c, b, pos, { tocador.irPara(it) }) { onEditar(b.falas.map { it.id }) }
                     is Bloco.Juntas -> BlocoJuntas(c, b, pos, { tocador.irPara(it) }) { onEditar(b.falas.map { it.id }) }
+                    is Bloco.Uma -> TurnoView(c, Turno(b.fala.quem, listOf(b.fala)), pos, { tocador.irPara(it) }) { onEditar(listOf(b.fala.id)) }
                 }
             }
             if (c.falas.isEmpty()) item { Text("A Mistral não achou fala nessa gravação.", color = Cor.sub, fontSize = 14.sp) }
         }
     }
 
-    if (renomearTitulo) DialogoTexto("Nome da conversa", c.titulo, { if (it.isNotBlank()) Banco.salvar(c.copy(titulo = it)) }) { renomearTitulo = false }
+    if (renomearTitulo) DialogoTexto("Nome da conversa", c.titulo, { if (it.isNotBlank()) Banco.salvar(bruta.copy(titulo = it)) }) { renomearTitulo = false }
     renomearPessoa?.let { p ->
-        DialogoTexto("Quem é ${c.nome(p)}?", c.nomes[p] ?: "", { Banco.salvar(c.copy(nomes = c.nomes + (p to it))) }) { renomearPessoa = null }
+        DialogoTexto("Quem é ${c.nome(p)}?", c.nomes[p] ?: "", { Banco.salvar(bruta.copy(nomes = bruta.nomes + (p to it))) }, dica = "Dica: dar o mesmo nome a duas pessoas junta as duas numa só.") { renomearPessoa = null }
     }
     if (compartilhar) {
         ModalBottomSheet(onDismissRequest = { compartilhar = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = Color(0xFF1F2228)) {
-            Compartilhar(ctx, c) { compartilhar = false }
+            Compartilhar(ctx, bruta) { compartilhar = false }
         }
     }
 }
 
+private const val JANELA = 60.0
+
 @Composable
 fun Tocadorzinho(c: Conversa, tocador: Tocador, cabeca: Cabeca, duracao: Double, pos: Double) {
     Cartao(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 8.dp)) {
+            Faixas(c, cabeca, duracao, pos, Modifier.fillMaxWidth()) { tocador.irPara(it) }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(hora(pos), color = Cor.texto, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(" / ${hora(duracao)}", color = Cor.sub, fontSize = 13.sp)
+                Spacer(Modifier.weight(1f))
+                Pulo("↺5") { tocador.irPara((tocador.posicao - 5).coerceAtLeast(0.0)) }
+                Spacer(Modifier.width(8.dp))
                 Box(
-                    Modifier.size(42.dp).clip(CircleShape).background(Cor.azul).clickable { tocador.alternar() },
+                    Modifier.size(46.dp).clip(CircleShape).background(Cor.azul).clickable { tocador.alternar() },
                     contentAlignment = Alignment.Center,
-                ) { Text(if (tocador.tocando) "❚❚" else "▶", color = Cor.escuroBotao, fontSize = if (tocador.tocando) 14.sp else 17.sp) }
-                Spacer(Modifier.width(10.dp))
-                Faixas(c, cabeca, duracao, pos, Modifier.weight(1f)) { tocador.irPara(it) }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${hora(pos)} / ${hora(duracao)}", color = Cor.sub, fontSize = 12.5.sp)
+                ) { Text(if (tocador.tocando) "❚❚" else "▶", color = Cor.escuroBotao, fontSize = if (tocador.tocando) 15.sp else 18.sp) }
+                Spacer(Modifier.width(8.dp))
+                Pulo("5↻") { tocador.irPara((tocador.posicao + 5).coerceAtMost(duracao)) }
                 Spacer(Modifier.weight(1f))
                 val vs = listOf(1f, 1.25f, 1.5f, 2f, 0.75f)
-                Pilula(("%.2f".format(tocador.velocidade)).trimEnd('0').trimEnd('.', ',').replace('.', ',') + "x") {
+                Pilula(("%.2f".format(java.util.Locale.US, tocador.velocidade)).trimEnd('0').trimEnd('.').replace('.', ',') + "x") {
                     tocador.mudarVelocidade(vs[(vs.indexOf(tocador.velocidade) + 1) % vs.size])
                 }
             }
@@ -192,70 +205,126 @@ fun Tocadorzinho(c: Conversa, tocador: Tocador, cabeca: Cabeca, duracao: Double,
     }
 }
 
-/** Uma faixa por pessoa. Tocar ou arrastar move a linha do áudio, e o texto vai junto. */
+@Composable
+private fun Pulo(t: String, onClick: () -> Unit) {
+    Box(Modifier.size(38.dp).clip(CircleShape).clickable { onClick() }, contentAlignment = Alignment.Center) {
+        Text(t, color = Cor.sub, fontSize = 13.sp)
+    }
+}
+
+/**
+ * Uma faixa por pessoa. Em gravação longa mostra só 1 minuto em volta da linha (dá pra ver as palavras de perto),
+ * com a gravação inteira numa faixa fininha embaixo. Tocar ou arrastar move a linha e o texto vai junto.
+ */
 @Composable
 fun Faixas(c: Conversa, cabeca: Cabeca, duracao: Double, pos: Double, modifier: Modifier = Modifier, corFn: (String) -> Color = { corDe(c, it) }, irPara: (Double) -> Unit) {
     val pessoas = c.pessoas.ifEmpty { listOf("speaker_1") }
     val dens = LocalDensity.current
-    val altFaixa = 10.dp; val vao = 5.dp
-    val alt = (altFaixa + vao) * pessoas.size + 8.dp
+    val n = pessoas.size
+    val altFaixa = when { n <= 3 -> 10.dp; n <= 5 -> 8.dp; else -> 6.dp }
+    val vao = if (n <= 5) 5.dp else 4.dp
+    val zoom = duracao > JANELA * 1.5
+    var jIni by remember { mutableDoubleStateOf(0.0) }
+    val jTam = if (zoom) JANELA else duracao.coerceAtLeast(1.0)
+    // a janela anda junto quando a linha chega perto da borda
+    if (zoom && !cabeca.arrastando) {
+        if (pos > jIni + jTam * 0.85 || pos < jIni) jIni = (pos - jTam * 0.15).coerceIn(0.0, (duracao - jTam).coerceAtLeast(0.0))
+    } else if (!zoom) jIni = 0.0
     var ultimoSeek by remember { mutableLongStateOf(0L) }
-    Canvas(
-        modifier.height(alt)
-            .pointerInput(duracao) {
-                detectTapGestures { o -> irPara((o.x / size.width).coerceIn(0f, 1f) * duracao) }
-            }
-            .pointerInput(duracao) {
-                detectDragGestures(
-                    onDragStart = { o -> cabeca.arrastando = true; cabeca.posArraste = (o.x / size.width).coerceIn(0f, 1f) * duracao },
-                    onDragEnd = { irPara(cabeca.posArraste); cabeca.arrastando = false },
-                    onDragCancel = { irPara(cabeca.posArraste); cabeca.arrastando = false },
-                ) { ch, _ ->
-                    cabeca.posArraste = (ch.position.x / size.width).coerceIn(0f, 1f) * duracao
-                    val agora = System.currentTimeMillis()
-                    if (agora - ultimoSeek > 60) { ultimoSeek = agora; irPara(cabeca.posArraste) }
+    fun seek(t: Double, forcar: Boolean = false) {
+        val agora = System.currentTimeMillis()
+        if (forcar || agora - ultimoSeek > 50) { ultimoSeek = agora; irPara(t) }
+    }
+    val alt = (altFaixa + vao) * n + 6.dp
+    Column(modifier) {
+        Canvas(
+            Modifier.fillMaxWidth().height(alt)
+                .pointerInput(duracao, zoom) {
+                    detectTapGestures { o -> seek(jIni + (o.x / size.width).coerceIn(0f, 1f) * jTam, true) }
+                }
+                .pointerInput(duracao, zoom) {
+                    detectDragGestures(
+                        onDragStart = { o -> cabeca.arrastando = true; cabeca.posArraste = jIni + (o.x / size.width).coerceIn(0f, 1f) * jTam },
+                        onDragEnd = { seek(cabeca.posArraste, true); cabeca.arrastando = false },
+                        onDragCancel = { seek(cabeca.posArraste, true); cabeca.arrastando = false },
+                    ) { ch, _ ->
+                        cabeca.posArraste = (jIni + (ch.position.x / size.width).coerceIn(0f, 1f) * jTam).coerceIn(0.0, duracao)
+                        seek(cabeca.posArraste)
+                    }
+                }
+        ) {
+            val w = size.width
+            val fh = with(dens) { altFaixa.toPx() }; val g = with(dens) { vao.toPx() }
+            val raio = CornerRadius(fh / 2, fh / 2)
+            fun x(t: Double) = ((t - jIni) / jTam * w).toFloat()
+            pessoas.forEachIndexed { i, p ->
+                val y = 3f + i * (fh + g)
+                drawRoundRect(Color(0x12FFFFFF), Offset(0f, y), Size(w, fh), raio)
+                val cor = corFn(p)
+                c.falas.forEach { f ->
+                    if (f.quem != p || f.fim < jIni || f.ini > jIni + jTam) return@forEach
+                    val x0 = x(f.ini).coerceAtLeast(0f); val x1 = x(f.fim).coerceAtMost(w).coerceAtLeast(x0 + fh * 0.7f)
+                    val agora = pos >= f.ini && pos < f.fim
+                    drawRoundRect(cor.copy(alpha = if (agora) 1f else if (f.fim <= pos) 0.8f else 0.4f), Offset(x0, y), Size(x1 - x0, fh), raio)
+                    if (agora) drawRoundRect(Color.White.copy(alpha = 0.5f), Offset(x0, y), Size(x1 - x0, fh), raio, style = Stroke(1.5f))
                 }
             }
-    ) {
-        val w = size.width
-        val fh = with(dens) { altFaixa.toPx() }; val g = with(dens) { vao.toPx() }
-        val raio = CornerRadius(fh / 2, fh / 2)
-        val ativos = c.falas.filter { pos >= it.ini && pos < it.fim }.map { it.quem }.toSet()
-        pessoas.forEachIndexed { i, p ->
-            val y = 4f + i * (fh + g)
-            drawRoundRect(Color(0x0FFFFFFF), Offset(0f, y), Size(w, fh), raio)
-            val cor = corFn(p)
-            c.falas.filter { it.quem == p }.forEach { f ->
-                if (duracao <= 0) return@forEach
-                val x0 = (f.ini / duracao * w).toFloat(); val x1 = (f.fim / duracao * w).toFloat().coerceAtLeast(x0 + fh * 0.6f)
-                val passado = f.fim <= pos
-                drawRoundRect(cor.copy(alpha = if (passado || (p in ativos && pos >= f.ini && pos < f.fim)) 1f else 0.45f), Offset(x0, y), Size(x1 - x0, fh), raio)
-            }
+            val px = x(pos).coerceIn(0f, w)
+            drawRect(Cor.texto, Offset(px - 1.5f, 0f), Size(3f, size.height))
+            drawCircle(Cor.texto, if (cabeca.arrastando) 10f else 6f, Offset(px, 3f))
         }
-        if (duracao > 0) {
-            val x = (pos / duracao * w).toFloat().coerceIn(0f, w)
-            drawRect(Cor.texto, Offset(x - 1.5f, 0f), Size(3f, size.height))
-            drawCircle(Cor.texto, if (cabeca.arrastando) 9f else 6f, Offset(x, 2f))
+        if (zoom) {
+            Espaco(8)
+            // visão geral: a gravação inteira; tocar ou arrastar pula direto
+            Canvas(
+                Modifier.fillMaxWidth().height(14.dp)
+                    .pointerInput(duracao) { detectTapGestures { o -> seek((o.x / size.width).coerceIn(0f, 1f) * duracao, true) } }
+                    .pointerInput(duracao) {
+                        detectDragGestures(
+                            onDragStart = { o -> cabeca.arrastando = true; cabeca.posArraste = (o.x / size.width).coerceIn(0f, 1f) * duracao },
+                            onDragEnd = { seek(cabeca.posArraste, true); cabeca.arrastando = false; jIni = (cabeca.posArraste - jTam * 0.15).coerceIn(0.0, (duracao - jTam).coerceAtLeast(0.0)) },
+                            onDragCancel = { seek(cabeca.posArraste, true); cabeca.arrastando = false },
+                        ) { ch, _ ->
+                            cabeca.posArraste = (ch.position.x / size.width).coerceIn(0f, 1f) * duracao
+                            jIni = (cabeca.posArraste - jTam * 0.15).coerceIn(0.0, (duracao - jTam).coerceAtLeast(0.0))
+                            seek(cabeca.posArraste)
+                        }
+                    }
+            ) {
+                val w = size.width; val h = size.height
+                val y = h / 2 - 2f
+                drawRoundRect(Color(0x12FFFFFF), Offset(0f, y), Size(w, 4f), CornerRadius(2f, 2f))
+                c.falas.forEach { f ->
+                    val x0 = (f.ini / duracao * w).toFloat(); val x1 = (f.fim / duracao * w).toFloat().coerceAtLeast(x0 + 2f)
+                    drawRect(corFn(f.quem).copy(alpha = 0.7f), Offset(x0, y), Size(x1 - x0, 4f))
+                }
+                val a = (jIni / duracao * w).toFloat(); val b = ((jIni + jTam) / duracao * w).toFloat()
+                drawRoundRect(Color.White.copy(alpha = 0.10f), Offset(a, 0f), Size(b - a, h), CornerRadius(4f, 4f))
+                drawRoundRect(Color.White.copy(alpha = 0.35f), Offset(a, 0f), Size(b - a, h), CornerRadius(4f, 4f), style = Stroke(1.5f))
+                val px = (pos / duracao * w).toFloat()
+                drawRect(Cor.texto, Offset(px - 1f, 0f), Size(2f, h))
+            }
         }
     }
 }
 
 /** Texto em que cada palavra é tocável e a palavra que está tocando fica marcada. */
 @Composable
-fun TextoPalavras(f: Fala, cor: Color, pos: Double, irPara: (Double) -> Unit, tamanho: Float = 15f) {
+fun TextoPalavras(f: Fala, cor: Color, pos: Double, irPara: (Double) -> Unit, tamanho: Float = 15.5f) {
     val palavras = remember(f) { f.palavras }
     val tempos = remember(f) { f.tempos() }
     val ativa = if (pos >= f.ini && pos < f.fim) tempos.indexOfLast { it <= pos } else -1
     val inicios = remember(palavras) { var acc = 0; palavras.map { w -> val s = acc; acc += w.length + 1; s } }
     val texto = buildAnnotatedString {
         palavras.forEachIndexed { i, w ->
-            if (i == ativa) withStyle(SpanStyle(background = cor.copy(alpha = 0.32f), color = Color.White)) { append(w) } else append(w)
+            if (i == ativa) withStyle(SpanStyle(background = cor.copy(alpha = 0.35f), color = Color.White)) { append(w) } else append(w)
             if (i < palavras.lastIndex) append(' ')
         }
     }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    val falando = pos >= f.ini && pos < f.fim
     Text(
-        texto, color = Cor.texto2, fontSize = tamanho.sp, lineHeight = (tamanho * 1.5f).sp,
+        texto, color = if (falando) Cor.texto else Cor.texto2, fontSize = tamanho.sp, lineHeight = (tamanho * 1.45f).sp,
         onTextLayout = { layout = it },
         modifier = Modifier.pointerInput(f) {
             detectTapGestures { o ->
@@ -268,45 +337,54 @@ fun TextoPalavras(f: Fala, cor: Color, pos: Double, irPara: (Double) -> Unit, ta
     )
 }
 
+/** Falas seguidas de uma pessoa: nome em cima, texto embaixo usando a largura toda. */
 @Composable
-fun LinhaFala(c: Conversa, f: Fala, pos: Double, irPara: (Double) -> Unit, onEditar: () -> Unit) {
-    val cor = corDe(c, f.quem)
-    val atual = pos >= f.ini && pos < f.fim
+fun TurnoView(c: Conversa, t: Turno, pos: Double, irPara: (Double) -> Unit, onEditar: () -> Unit) {
+    val cor = corDe(c, t.quem)
+    val atual = pos >= t.ini && pos < t.fim
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-        Column(Modifier.width(70.dp).clickable { onEditar() }.padding(top = 2.dp)) {
-            Text(c.nome(f.quem), color = cor, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 2)
-            Text(hora(f.ini), color = Cor.sub, fontSize = 11.5.sp)
-            if (f.manual || f.revisado) Text("✎ editado", color = Cor.sub, fontSize = 10.5.sp)
+        Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(cor.copy(alpha = if (atual) 1f else 0.55f)))
+        Column(
+            Modifier.weight(1f).clip(RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp))
+                .background(if (atual) Cor.cartao else Color.Transparent)
+                .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(c.nome(t.quem), color = cor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { irPara(t.ini) })
+                Text("  ${hora(t.ini)}", color = Cor.sub, fontSize = 12.sp, modifier = Modifier.clickable { irPara(t.ini) })
+                if (t.falas.any { it.revisado || it.manual }) Text("  · editado", color = Cor.sub, fontSize = 11.sp)
+                Spacer(Modifier.weight(1f))
+                Text("✎", color = Cor.sub, fontSize = 14.sp, modifier = Modifier.clip(CircleShape).clickable { onEditar() }.padding(horizontal = 8.dp, vertical = 2.dp))
+            }
+            Spacer(Modifier.height(2.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                t.falas.forEach { f -> TextoPalavras(f, cor, pos, irPara) }
+            }
         }
-        Box(Modifier.width(2.dp).fillMaxHeight().background(cor))
-        Box(
-            Modifier.weight(1f).clip(RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp))
-                .background(if (atual) Cor.azul2.copy(alpha = 0.45f) else Color.Transparent)
-                .padding(start = 12.dp, end = 6.dp, top = 2.dp, bottom = 2.dp)
-        ) { TextoPalavras(f, cor, pos, irPara) }
     }
 }
 
 @Composable
 fun BlocoJuntas(c: Conversa, b: Bloco.Juntas, pos: Double, irPara: (Double) -> Unit, onEditar: () -> Unit) {
-    Cartao(Modifier.fillMaxWidth(), borda = Cor.laranjaBorda, fundo = Color(0x10FF9A3C)) {
+    val atual = pos >= b.ini && pos < b.fim
+    Cartao(Modifier.fillMaxWidth(), borda = if (atual) Cor.laranja else Cor.laranjaBorda, fundo = Color(0x12FF9A3C)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("⚡ ao mesmo tempo · ${hora(b.ini)}–${hora(b.fim)}", color = Cor.laranja, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
-                if (b.revisado) Text("revisado", color = Cor.verde, fontSize = 11.5.sp)
+                Text("⚡ falando junto · ${hora(b.ini)}–${hora(b.fim)}", color = Cor.laranja, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                if (b.revisado) Etiqueta("revisado", Cor.verde, Cor.verde2)
             }
             b.falas.forEach { f ->
                 val cor = corDe(c, f.quem)
                 Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                    Box(Modifier.width(2.dp).fillMaxHeight().background(cor))
+                    Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(cor))
                     Column(Modifier.padding(start = 10.dp)) {
-                        Text("${c.nome(f.quem)} · ${hora(f.ini)}", color = cor, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
-                        TextoPalavras(f, cor, pos, irPara, 14.5f)
+                        Text("${c.nome(f.quem)}  ${hora(f.ini)}", color = cor, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { irPara(f.ini) })
+                        TextoPalavras(f, cor, pos, irPara, 15f)
                     }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!b.revisado) Text("pode faltar uma das vozes", color = Cor.sub, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
+                if (!b.revisado) Text("pode faltar fala de alguém", color = Cor.sub, fontSize = 11.5.sp, modifier = Modifier.weight(1f))
                 else Spacer(Modifier.weight(1f))
                 Pilula("✎ editar trecho", cor = Cor.laranja, borda = Cor.laranjaBorda, fundo = Color.Transparent) { onEditar() }
             }

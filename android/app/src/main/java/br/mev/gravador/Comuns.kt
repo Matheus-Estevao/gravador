@@ -93,15 +93,18 @@ fun campoCores() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-fun DialogoTexto(titulo: String, inicial: String, onOk: (String) -> Unit, onFechar: () -> Unit) {
+fun DialogoTexto(titulo: String, inicial: String, onOk: (String) -> Unit, dica: String? = null, onFechar: () -> Unit) {
     var t by remember { mutableStateOf(inicial) }
     AlertDialog(
         onDismissRequest = onFechar,
         containerColor = Cor.cartao2,
         title = { Text(titulo, color = Cor.texto) },
         text = {
-            OutlinedTextField(t, { t = it }, singleLine = true, colors = campoCores(),
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences), modifier = Modifier.fillMaxWidth())
+            Column {
+                OutlinedTextField(t, { t = it }, singleLine = true, colors = campoCores(),
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences), modifier = Modifier.fillMaxWidth())
+                if (dica != null) Text(dica, color = Cor.sub, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+            }
         },
         confirmButton = { TextButton({ onOk(t.trim()); onFechar() }) { Text("Salvar", color = Cor.azul) } },
         dismissButton = { TextButton(onFechar) { Text("Cancelar", color = Cor.sub) } },

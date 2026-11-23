@@ -11,7 +11,7 @@ import kotlin.math.sin
 
 /** Modo de demonstração (só pra testar telas sem a pasta do celular). Liga com: am start ... --ez demo true */
 object Demo {
-    private const val DUR = 90.0
+    private const val DUR = 350.0
 
     private fun audio(ctx: Context): File {
         val f = File(ctx.cacheDir, "demo.wav")
@@ -45,8 +45,29 @@ object Demo {
     fun semear(ctx: Context) {
         val g = gravacoes(ctx)[1]
         if (Banco.ler(g.chave) == null) Banco.salvar(transcrever(g).copy(titulo = "Consulta Dr. Paulo", nomes = mapOf("speaker_1" to "Dr. Paulo", "speaker_2" to "Matheus")))
+        val g0 = gravacoes(ctx)[0]
+        if (Banco.ler(g0.chave) == null) Banco.salvar(prova(g0))
         val g2 = gravacoes(ctx)[3]
         if (Banco.ler(g2.chave) == null) Banco.salvar(transcrever(g2).copy(titulo = "Discussão do carro"))
+    }
+
+    /** Conversa longa com 7 vozes (parecida com a gravação real que ele testou). */
+    fun prova(g: Gravacao): Conversa {
+        val frases = listOf(
+            "É observação, né?", "É na extensão, tá lá, a cheirada tá lá.", "Eu vou soltar a palaclagem aqui, então vai dar uma saída.",
+            "Aí bota aqui, ó.", "Até aqui, às seis horas.", "Isso, segura firme.", "Pode tirar agora.", "Tá bom assim?",
+            "Calma, deixa eu ver.", "Não, mais pra cima.", "Agora sim.", "Vai precisar de outra?", "Acho que não.",
+        )
+        val quem = listOf(1, 1, 1, 2, 3, 3, 1, 4, 4, 1, 5, 6, 7, 6, 5, 7, 1, 3, 3, 2)
+        val f = mutableListOf<Fala>()
+        var t = 95.0
+        quem.forEachIndexed { i, q ->
+            val d = 3.0 + (i % 4) * 1.5
+            val ini = if (i == 9 || i == 14) t - 2.0 else t
+            f += Fala(i + 1, "speaker_$q", ini, ini + d, frases[i % frases.size])
+            t = ini + d + 1.0 + (i % 3) * 3.0
+        }
+        return Conversa(g.chave, g.nome, g.uri.toString(), "Prova, ausentei do hospital", g.quando, DUR, emptyMap(), f)
     }
 
     fun transcrever(g: Gravacao): Conversa {

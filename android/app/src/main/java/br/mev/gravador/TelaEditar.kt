@@ -68,7 +68,8 @@ fun TelaEditar(chave: String, ids: List<Int>, tocador: Tocador, onFechar: () -> 
     val pessoasExtras = remember { mutableStateListOf<String>() }
     val pessoas = (c.pessoas + pessoasExtras).distinct()
     val nomeDe = { p: String -> c.nome(p) }
-    val corPessoa = { p: String -> if (p in c.pessoas) corDe(c, p) else Cor.vozes[(c.pessoas.size + pessoasExtras.indexOf(p).coerceAtLeast(0)) % Cor.vozes.size] }
+    val cu = remember { c.unificada() }
+    val corPessoa = { p: String -> if (c.canonica(p) in cu.pessoas) corDe(cu, c.canonica(p)) else Cor.vozes[(c.pessoas.size + pessoasExtras.indexOf(p).coerceAtLeast(0)) % Cor.vozes.size] }
 
     LaunchedEffect(Unit) { tocador.carregar(c.uri); tocador.irPara(ini) }
     LaunchedEffect(repetir) { tocador.loop = if (repetir) ini to fim else null }

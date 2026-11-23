@@ -79,6 +79,20 @@ data class Conversa(
 
     val proximoId: Int get() = (falas.maxOfOrNull { it.id } ?: 0) + 1
 
+    /** Pessoas com o mesmo nome viram uma só (a primeira que apareceu). */
+    fun canonica(quem: String): String {
+        val n = nomes[quem]?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return quem
+        return falas.sortedBy { it.ini }.map { it.quem }.distinct().firstOrNull { nomes[it]?.trim()?.lowercase() == n } ?: quem
+    }
+
+    /** Cópia em que cada fala usa a pessoa canônica (pra exibir e copiar). */
+    fun unificada(): Conversa {
+        if (nomes.isEmpty()) return this
+        val mapa = falas.map { it.quem }.distinct().associateWith { canonica(it) }
+        if (mapa.all { (k, v) -> k == v }) return this
+        return copy(falas = falas.map { it.copy(quem = mapa[it.quem] ?: it.quem) })
+    }
+
     companion object {
         fun de(o: JSONObject): Conversa {
             val n = o.optJSONObject("nomes") ?: JSONObject()
@@ -105,6 +119,38 @@ sealed class Bloco {
         override val ini get() = falas.minOf { it.ini }; override val fim get() = falas.maxOf { it.fim }
         val revisado get() = falas.all { it.revisado }
     }
+}
+
+/** Falas seguidas da mesma pessoa, sem ninguém no meio. */
+data class Turno(val quem: String, val falas: List<Fala>) : Bloco() {
+    override val ini get() = falas.first().ini
+    override val fim get() = falas.maxOf { it.fim }
+}
+
+/** Junta blocos de uma fala só seguidos da mesma pessoa num turno. */
+fun turnos(bs: List<Bloco>): List<Bloco> {
+    val out = mutableListOf<Bloco>()
+    for (b in bs) {
+        val ult = out.lastOrNull()
+        if (b is Bloco.Uma) {
+            if (ult is Turno && ult.quem == b.fala.quem) out[out.lastIndex] = Turno(ult.quem, ult.falas + b.fala)
+            else out += Turno(b.fala.quem, listOf(b.fala))
+        } else out += b
+    }
+    return out
+}
+
+/** Coloca cada palavra (início, fim) na fala em que ela cai. */
+fun alinharPalavras(falas: List<Fala>, palavras: List<Pair<Double, Double>>): List<Fala> {
+    if (palavras.isEmpty()) return falas
+    val por = HashMap<Int, MutableList<Double>>()
+    for ((a, b) in palavras) {
+        val m = (a + b) / 2
+        val dentro = falas.filter { m >= it.ini - 0.05 && m <= it.fim + 0.05 }
+        val f = dentro.minByOrNull { kotlin.math.abs((it.ini + it.fim) / 2 - m) } ?: continue
+        por.getOrPut(f.id) { mutableListOf() } += a
+    }
+    return falas.map { f -> por[f.id]?.takeIf { it.size >= 2 }?.let { f.copy(wt = it.sorted()) } ?: f }
 }
 
 const val FOLGA = 0.15
@@ -167,7 +213,8 @@ fun semAcento(s: String): String =
     Normalizer.normalize(s, Normalizer.Form.NFD).replace(Regex("\\p{M}"), "").lowercase()
 
 /** Texto para copiar/compartilhar, no formato aprovado. */
-fun textoParaCopiar(c: Conversa): String {
+fun textoParaCopiar(conv: Conversa): String {
+    val c = conv.unificada()
     val sb = StringBuilder()
     sb.append("Conversa: ").append(c.titulo).append('\n')
     sb.append("Data: ").append(dataLonga(c.quando)).append(" · ").append(duracaoCurta(c.duracao)).append('\n')
@@ -184,6 +231,7 @@ fun textoParaCopiar(c: Conversa): String {
                 }
                 ultimo = f.quem
             }
+            is Turno -> {}
             is Bloco.Juntas -> {
                 sb.append('[').append(hora(b.ini)).append('–').append(hora(b.fim)).append("] FALANDO AO MESMO TEMPO")
                 if (!b.revisado) sb.append(" (não revisado)")

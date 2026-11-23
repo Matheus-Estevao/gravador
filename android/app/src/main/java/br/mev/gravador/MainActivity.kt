@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
             val gs = Demo.gravacoes(this)
             telaInicial = when (t) {
                 "conversa", "compartilhar" -> Tela.Conversa(gs[1].chave)
+                "prova" -> Tela.Conversa(gs[0].chave)
                 "editar" -> Tela.Editar(gs[1].chave, listOf(3, 4))
                 "ajustes" -> Tela.Ajustes
                 else -> Tela.Lista
