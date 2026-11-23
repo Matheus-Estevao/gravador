@@ -18,4 +18,5 @@ abrir --es tela ajustes; shot 6-ajustes 5
 abrir --es tela conversa --ei pos 2; sleep 6
 adb shell input swipe 300 700 900 700 800; shot 7-depois-de-arrastar 3
 adb logcat -d -s AndroidRuntime:E > $OUT/erros.txt || true
+echo "fim do roteiro" >> $OUT/erros.txt
 exit 0
