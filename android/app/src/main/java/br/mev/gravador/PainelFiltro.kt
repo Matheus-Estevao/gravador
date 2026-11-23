@@ -2,6 +2,7 @@ package br.mev.gravador
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -181,7 +182,19 @@ fun PainelFiltro(
                 steps = n - 2,
                 colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = Cor.azul, inactiveTrackColor = Cor.linha,
                     activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent),
-                modifier = Modifier.height(30.dp),
+                modifier = Modifier.height(34.dp),
+                startThumb = { Bolinha() },
+                endThumb = { Bolinha() },
+                track = { st ->
+                    Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+                        val tot = st.valueRange.endInclusive - st.valueRange.start
+                        val a = (st.activeRangeStart - st.valueRange.start) / tot * size.width
+                        val b = (st.activeRangeEnd - st.valueRange.start) / tot * size.width
+                        val r = CornerRadius(size.height / 2, size.height / 2)
+                        drawRoundRect(Cor.linha, size = size, cornerRadius = r)
+                        drawRoundRect(Cor.azul, Offset(a, 0f), Size(b - a, size.height), r)
+                    }
+                },
             )
             Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp)) {
                 listOf("0", "1 min", "15 min", "1 h", "10 h+").forEachIndexed { i, t ->
@@ -270,6 +283,10 @@ private fun Linha(icone: androidx.compose.ui.graphics.vector.ImageVector, nome: 
         if (valor != null) Text(valor, color = Cor.texto, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
     }
 }
+
+@Composable
+private fun Bolinha() = Box(Modifier.size(24.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Color.White)
+    .border(4.dp, Cor.azul.copy(alpha = 0.3f), androidx.compose.foundation.shape.CircleShape))
 
 @Composable
 private fun Divisor() = HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color(0xFF222D39))
