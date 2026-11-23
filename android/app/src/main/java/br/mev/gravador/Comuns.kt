@@ -82,6 +82,14 @@ fun Redondo(simbolo: String, modifier: Modifier = Modifier, tamanho: Dp = 40.dp,
 }
 
 @Composable
+fun RedondoIc(v: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier = Modifier, tamanho: Dp = 40.dp, onClick: () -> Unit) {
+    Box(
+        modifier.size(tamanho).clip(CircleShape).background(Cor.cartao).border(1.dp, Cor.linha, CircleShape).clickable { onClick() },
+        contentAlignment = Alignment.Center,
+    ) { Ic(v, Cor.texto2, 20.dp) }
+}
+
+@Composable
 fun Cartao(modifier: Modifier = Modifier, borda: Color = Cor.linha, fundo: Color = Cor.cartao, conteudo: @Composable () -> Unit) {
     Box(modifier.clip(RoundedCornerShape(16.dp)).background(fundo).border(1.dp, borda, RoundedCornerShape(16.dp))) { conteudo() }
 }

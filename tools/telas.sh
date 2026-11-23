@@ -16,12 +16,17 @@ adb shell settings put system font_scale 1.3
 tira_aviso() { python3 tools/ui.py texto "Wait" | { read X Y && [ -n "$X" ] && adb shell input tap $X $Y; } ; true; }
 shot() { sleep ${2:-5}; tira_aviso; adb exec-out screencap -p > $OUT/$1.png; }
 abrir() { adb shell am force-stop $P; sleep 1; adb shell am start -n $P/.MainActivity --ez demo true "$@"; }
+toca() { read X Y <<< "$(python3 tools/ui.py itexto "$1")"; echo "tocar '$1' em $X $Y"; [ -n "$X" ] && adb shell input tap $X $Y; }
+segura() { read X Y <<< "$(python3 tools/ui.py itexto "$1")"; echo "segurar '$1' em $X $Y"; [ -n "$X" ] && adb shell input swipe $X $Y $X $Y 900; }
 abrir --es tela lista; shot 1-lista 7
 abrir --es tela conversa --ei pos 23; shot 2-conversa-trecho-junto 7
 abrir --es tela conversa --ei pos 65; shot 3-conversa-fim 7
 abrir --es tela editar; shot 4-editar 7
 abrir --es tela compartilhar; shot 5-compartilhar 7
 abrir --es tela ajustes; shot 6-ajustes 5
+abrir --es tela filtro; shot 15-filtro-painel 7
+toca "Pai"; sleep 1; shot 16-filtro-pai 1
+toca "Mostrar"; shot 17-lista-filtrada 3
 abrir --es tela prova --ei pos 130; shot 11-prova-7-vozes 7
 abrir --es tela prova --ei pos 200; shot 12-prova-mais-adiante 7
 # arrastar a linha do áudio: print no meio do arraste (texto deve acompanhar)
@@ -53,8 +58,6 @@ adb shell content call --uri content://media --method scan_volume --arg external
 sleep 4
 pasta() { echo "== $1"; adb shell ls -R "$R" ; } >> $OUT/pastas.txt
 pasta "antes"
-toca() { read X Y <<< "$(python3 tools/ui.py itexto "$1")"; echo "tocar '$1' em $X $Y"; [ -n "$X" ] && adb shell input tap $X $Y; }
-segura() { read X Y <<< "$(python3 tools/ui.py itexto "$1")"; echo "segurar '$1' em $X $Y"; [ -n "$X" ] && adb shell input swipe $X $Y $X $Y 900; }
 adb shell am force-stop $P; sleep 1
 adb shell am start -n $P/.MainActivity --ez demo false; shot 20-sem-pasta 6
 toca "Liberar Recordings"; shot 21-seletor 5

@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -63,10 +64,11 @@ private val EXT_AUDIO = setOf("m4a", "mp3", "wav", "ogg", "opus", "aac", "amr", 
 /** Uma subpasta de Recordings (Voice Recorder, Call, ou criada por você). */
 data class Pastinha(val nome: String, val uri: Uri) {
     val rotulo: String get() = when {
-        nome.equals("Voice Recorder", true) -> "🎙 Gravador"
-        nome.equals("Call", true) -> "📞 Chamadas"
-        else -> "📁 $nome"
+        nome.equals("Voice Recorder", true) -> "Gravador"
+        nome.equals("Call", true) -> "Chamadas"
+        else -> nome
     }
+    val icone get() = when { nome.equals("Voice Recorder", true) -> Icones.mic; nome.equals("Call", true) -> Icones.fone; else -> Icones.pasta }
     val ordem: Int get() = when { nome.equals("Voice Recorder", true) -> 0; nome.equals("Call", true) -> 1; else -> 2 }
 }
 
@@ -159,21 +161,54 @@ object Pasta {
         return ord
     }
 
-    private val duracoes = HashMap<String, Double>()
+    // duração de cada arquivo (chave = nome|tamanho), guardada no celular pra não medir de novo
+    private val arqDur get() = File(App.app.filesDir, "duracoes.json")
+    private val duracoes: HashMap<String, Double> by lazy {
+        val m = HashMap<String, Double>()
+        try { val j = JSONObject(arqDur.readText()); j.keys().forEach { m[it] = j.getDouble(it) } } catch (e: Exception) { }
+        m
+    }
+    /** Sobe a cada lote medido (pra lista e filtro atualizarem). */
+    val medidas = MutableStateFlow(0)
+    @Volatile private var medindo = false
+
+    private fun gravarDuracoes() = synchronized(duracoes) {
+        val j = JSONObject(); duracoes.forEach { (k, v) -> j.put(k, v) }
+        try { arqDur.writeText(j.toString()) } catch (e: Exception) { }
+    }
 
     fun duracaoGuardada(g: Gravacao): Double? = synchronized(duracoes) { duracoes[g.chave] }
 
+    private fun medir(ctx: Context, g: Gravacao): Double = try {
+        MediaMetadataRetriever().run {
+            setDataSource(ctx, g.uri)
+            val ms = extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            release(); ms / 1000.0
+        }
+    } catch (e: Exception) { 0.0 }
+
     fun duracao(ctx: Context, g: Gravacao): Double {
         synchronized(duracoes) { duracoes[g.chave] }?.let { return it }
-        val d = try {
-            MediaMetadataRetriever().run {
-                setDataSource(ctx, g.uri)
-                val ms = extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                release(); ms / 1000.0
-            }
-        } catch (e: Exception) { 0.0 }
+        val d = medir(ctx, g)
         synchronized(duracoes) { duracoes[g.chave] = d }
         return d
+    }
+
+    /** Mede em segundo plano tudo que ainda não tem duração (as mais recentes primeiro). */
+    fun medirTodas(ctx: Context, gs: List<Gravacao>) {
+        if (medindo || Prefs.demo) return
+        val falta = gs.filter { duracaoGuardada(it) == null }.sortedByDescending { it.quando }
+        if (falta.isEmpty()) return
+        medindo = true
+        App.app.escopo.launch {
+            try {
+                falta.forEachIndexed { i, g ->
+                    val d = medir(ctx, g)
+                    synchronized(duracoes) { duracoes[g.chave] = d }
+                    if (i % 40 == 39) { medidas.update { it + 1 }; gravarDuracoes() }
+                }
+            } finally { gravarDuracoes(); medidas.update { it + 1 }; medindo = false }
+        }
     }
 }
 

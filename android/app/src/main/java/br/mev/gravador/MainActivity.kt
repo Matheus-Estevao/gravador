@@ -48,6 +48,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Modo demonstração: abre a lista já com o painel de filtro (pra tirar print). */
+var filtroDemo = false
+
 sealed class Tela {
     data object Lista : Tela()
     data object Ajustes : Tela()
@@ -76,6 +79,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         val abrirCompartilhar = Prefs.demo && intent?.getStringExtra("tela") == "compartilhar"
+        filtroDemo = Prefs.demo && intent?.getStringExtra("tela") == "filtro"
         val demoPos = if (Prefs.demo) intent?.getIntExtra("pos", -1) ?: -1 else -1
         setContent { Tema { App(telaInicial, abrirCompartilhar, demoPos) } }
     }

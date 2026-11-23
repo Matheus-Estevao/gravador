@@ -81,7 +81,7 @@ fun TelaLista(
     val estados by Tarefas.estados.collectAsState()
     val versao by Banco.versao.collectAsState()
     var busca by remember { mutableStateOf("") }
-    var abaNome by rememberSaveable { mutableStateOf("Voice Recorder") }
+    var abaNome by rememberSaveable { mutableStateOf(if (filtroDemo) "Call" else "Voice Recorder") }
     val aba = pastas.firstOrNull { it.first.nome == abaNome } ?: pastas.firstOrNull()
     val gravacoes = aba?.second ?: emptyList()
     val sel = remember { mutableStateListOf<String>() }
@@ -91,6 +91,12 @@ fun TelaLista(
     var novaPasta by remember { mutableStateOf(false) }
     var confirmarApagar by remember { mutableStateOf<List<Gravacao>?>(null) }
     val lista = rememberLazyListState()
+    var filtro by remember { mutableStateOf(Filtro()) }
+    var painel by remember { mutableStateOf(filtroDemo) }
+    val medidas by Pasta.medidas.collectAsState()
+    LaunchedEffect(pastas) { Pasta.medirTodas(ctx, pastas.flatMap { it.second }) }
+    fun durDe(g: Gravacao): Double? = if (Prefs.demo) (5 + (g.chave.hashCode().toLong().let { if (it < 0) -it else it } % 2400)).toDouble()
+        else Banco.ler(g.chave)?.duracao?.takeIf { it > 0 } ?: Pasta.duracaoGuardada(g)
 
     LaunchedEffect(abaNome) { sel.clear() }
     // some da seleção o que não existe mais
@@ -132,14 +138,15 @@ fun TelaLista(
         val gs = selecionadas()
         escopo.launch {
             val n = withContext(Dispatchers.IO) { Arquivos.mover(ctx, gs, destino) }
-            avisar(if (n == gs.size) "Movido pra ${destino.rotulo.drop(2).trim()}" else "Movi $n de ${gs.size}")
+            avisar(if (n == gs.size) "Movido pra ${destino.rotulo}" else "Movi $n de ${gs.size}")
             sel.clear(); onMudou()
         }
     }
 
-    val filtradas = remember(gravacoes, busca, versao) {
+    val filtradas = remember(gravacoes, busca, versao, filtro, medidas) {
         val q = semAcento(busca.trim())
-        if (q.isEmpty()) gravacoes else gravacoes.filter { g ->
+        val base = if (!filtro.ativo) gravacoes else gravacoes.filter { filtro.passa(it.quando, durDe(it), it.exibicao) }
+        if (q.isEmpty()) base else base.filter { g ->
             val c = Banco.ler(g.chave)
             semAcento(g.nome).contains(q) || (c != null && (semAcento(c.titulo).contains(q) || c.falas.any { semAcento(it.texto).contains(q) }))
         }
@@ -150,7 +157,7 @@ fun TelaLista(
         Box(Modifier.padding(start = 18.dp, end = 18.dp, top = 12.dp)) {
             if (selecionando) {
                 Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Redondo("✕") { sel.clear() }
+                    RedondoIc(Icones.fechar) { sel.clear() }
                     Spacer(Modifier.width(12.dp))
                     Text("${sel.size} ${if (sel.size == 1) "selecionada" else "selecionadas"}", color = Cor.texto, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     val todas = sel.size == filtradas.size
@@ -159,18 +166,32 @@ fun TelaLista(
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Cartao(Modifier.weight(1f)) {
-                        Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text("⌕", color = Cor.sub, fontSize = 15.sp); Spacer(Modifier.width(8.dp))
+                        Row(Modifier.height(44.dp).padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Ic(Icones.busca, Cor.sub, 18.dp); Spacer(Modifier.width(8.dp))
+                            val fichas = filtro.fichas()
+                            if (fichas.isNotEmpty()) {
+                                Row(Modifier.clickable { painel = true }, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    fichas.forEach { t ->
+                                        Text(t, color = Color(0xFFCFE6FF), fontSize = 12.5.sp, maxLines = 1,
+                                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF13283C)).padding(horizontal = 7.dp, vertical = 3.dp))
+                                    }
+                                }
+                                Spacer(Modifier.width(6.dp))
+                            }
                             Box(Modifier.weight(1f)) {
-                                if (busca.isEmpty()) Text("Buscar nos textos", color = Cor.sub, fontSize = 14.sp)
+                                if (busca.isEmpty() && fichas.isEmpty()) Text("Buscar nos textos", color = Cor.sub, fontSize = 14.sp)
                                 BasicTextField(busca, { busca = it }, singleLine = true, textStyle = TextStyle(color = Cor.texto, fontSize = 14.sp),
                                     cursorBrush = SolidColor(Cor.azul), modifier = Modifier.fillMaxWidth())
                             }
-                            if (busca.isNotEmpty()) Text("✕", color = Cor.sub, modifier = Modifier.clickable { busca = "" }.padding(start = 6.dp))
+                            if (busca.isNotEmpty()) Box(Modifier.clip(CircleShape).clickable { busca = "" }.padding(6.dp)) { Ic(Icones.fechar, Cor.sub, 16.dp) }
+                            Box(Modifier.clip(CircleShape).clickable { painel = true }.padding(8.dp)) {
+                                Ic(Icones.filtro, if (filtro.ativo) Cor.azul else Cor.texto2, 20.dp)
+                                if (filtro.ativo) Box(Modifier.align(Alignment.TopEnd).size(8.dp).clip(CircleShape).background(Cor.azul))
+                            }
                         }
                     }
                     Spacer(Modifier.width(10.dp))
-                    Redondo("⚙", onClick = onAjustes)
+                    RedondoIc(Icones.ajustes, tamanho = 44.dp, onClick = onAjustes)
                 }
             }
         }
@@ -190,8 +211,13 @@ fun TelaLista(
                             .clickable { abaNome = p.nome; escopo.launch { lista.scrollToItem(0) } }.padding(vertical = 9.dp, horizontal = if (poucas) 0.dp else 14.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text("${p.rotulo}  ${gs.size}", color = if (ativa) Cor.texto else Cor.sub, fontSize = 13.5.sp,
-                            fontWeight = if (ativa) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Ic(p.icone, if (ativa) Cor.texto else Cor.sub, 16.dp); Spacer(Modifier.width(7.dp))
+                            Text(p.rotulo, color = if (ativa) Cor.texto else Cor.sub, fontSize = 14.sp,
+                                fontWeight = if (ativa) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.width(6.dp))
+                            Text("${gs.size}", color = Cor.sub, fontSize = 12.sp)
+                        }
                     }
                 }
             }
@@ -219,6 +245,13 @@ fun TelaLista(
                 }
             }
             item { PainelAtualizacao(sempre = false) }
+            if (filtro.ativo) item {
+                Row(Modifier.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${filtradas.size} de ${"%,d".format(gravacoes.size).replace(',', '.')} ${if (aba?.first?.nome.equals("Call", true)) "chamadas" else "gravações"}",
+                        color = Cor.sub, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+                    Text("Limpar", color = Cor.azul, fontSize = 13.sp, modifier = Modifier.clickable { filtro = Filtro() }.padding(4.dp))
+                }
+            }
             if (temPasta && Prefs.chave.isBlank() && !Prefs.demo) {
                 item {
                     Cartao(Modifier.fillMaxWidth(), borda = Cor.laranjaBorda) {
@@ -238,9 +271,8 @@ fun TelaLista(
             items(filtradas, key = { it.chave }) { g ->
                 val c = remember(versao, g.chave) { Banco.ler(g.chave) }
                 val est = estados[g.chave] ?: Estado.Nada
-                var dur by remember(g.chave) { mutableStateOf(c?.duracao?.takeIf { it > 0 } ?: Pasta.duracaoGuardada(g) ?: 0.0) }
+                var dur by remember(g.chave, medidas) { mutableStateOf(durDe(g) ?: 0.0) }
                 LaunchedEffect(g.chave) { if (dur <= 0 && !Prefs.demo) dur = withContext(Dispatchers.IO) { Pasta.duracao(ctx, g) } }
-                if (Prefs.demo && dur <= 0) dur = 350.0
                 val marcada = g.chave in sel
                 fun alternar() { if (marcada) sel.remove(g.chave) else sel.add(g.chave) }
                 Cartao(
@@ -290,13 +322,16 @@ fun TelaLista(
                 Modifier.fillMaxWidth().background(Cor.cartao2).border(1.dp, Cor.linha).padding(vertical = 8.dp, horizontal = 8.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
-                Acao("✎", "Renomear", ativo = sel.size == 1) { if (!emDemo()) renomeando = selecionadas().firstOrNull() }
-                Acao("⇄", "Mover") { if (!emDemo()) movendo = true }
-                Acao("⇪", "Compartilhar") { compartilhar(selecionadas()) }
-                Acao("🗑", "Apagar", cor = Cor.vermelho) { apagar(selecionadas()) }
+                Acao(Icones.lapis, "Renomear", ativo = sel.size == 1) { if (!emDemo()) renomeando = selecionadas().firstOrNull() }
+                Acao(Icones.mover, "Mover") { if (!emDemo()) movendo = true }
+                Acao(Icones.compartilhar, "Compartilhar") { compartilhar(selecionadas()) }
+                Acao(Icones.lixo, "Apagar", cor = Cor.vermelho) { apagar(selecionadas()) }
             }
         }
     }
+
+    if (painel) PainelFiltro(gravacoes, filtro, mostrarPessoa = aba?.first?.nome.equals("Call", true) || gravacoes.any { it.ehChamada },
+        duracaoDe = { durDe(it) }, onAplicar = { filtro = it; painel = false; escopo.launch { lista.scrollToItem(0) } }, onFechar = { painel = false })
 
     renomeando?.let { g ->
         DialogoTexto("Renomear", g.titulo, onOk = { novo ->
@@ -319,7 +354,7 @@ fun TelaLista(
                     pastas.map { it.first }.filter { it.uri != atual?.uri }.forEach { p ->
                         Pilula(p.rotulo, Modifier.fillMaxWidth()) { movendo = false; mover(p) }
                     }
-                    Pilula("＋ Nova pasta em Recordings", Modifier.fillMaxWidth(), cor = Cor.azul) { movendo = false; novaPasta = true }
+                    Pilula("+ Nova pasta em Recordings", Modifier.fillMaxWidth(), cor = Cor.azul) { movendo = false; novaPasta = true }
                 }
             },
             confirmButton = {},
@@ -357,13 +392,13 @@ fun TelaLista(
 }
 
 @Composable
-private fun Acao(icone: String, texto: String, ativo: Boolean = true, cor: Color = Cor.texto, onClick: () -> Unit) {
+private fun Acao(icone: androidx.compose.ui.graphics.vector.ImageVector, texto: String, ativo: Boolean = true, cor: Color = Cor.texto, onClick: () -> Unit) {
     Column(
         Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = ativo, onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         val c = if (ativo) cor else Cor.sub.copy(alpha = 0.45f)
-        Text(icone, color = c, fontSize = 20.sp)
+        Ic(icone, c, 22.dp); Spacer(Modifier.height(3.dp))
         Text(texto, color = c, fontSize = 12.sp, textAlign = TextAlign.Center)
     }
 }
